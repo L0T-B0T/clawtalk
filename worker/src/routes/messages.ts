@@ -111,10 +111,27 @@ export async function handlePostMessage(
   };
 
   // Store one message per recipient
-  for (const recipient of recipients) {
-    // Verify recipient exists
-    const recipientRecord = await env.AGENTS.get(`agent:${recipient}`);
-    if (!recipientRecord) continue;
+  for (let recipient of recipients) {
+    // Case-insensitive recipient lookup: try exact, then scan agents
+    let recipientRecord = await env.AGENTS.get(`agent:${recipient}`);
+    if (!recipientRecord) {
+      // Try case-insensitive match
+      const agentList = await env.AGENTS.list({ prefix: "agent:" });
+      for (const k of agentList.keys) {
+        const name = k.name.slice("agent:".length);
+        if (name.toLowerCase() === recipient.toLowerCase()) {
+          recipient = name; // use canonical casing
+          recipientRecord = await env.AGENTS.get(k.name);
+          break;
+        }
+      }
+      if (!recipientRecord) continue;
+    }
+    // Always normalize to canonical name from agent record
+    const parsed: AgentRecord = JSON.parse(recipientRecord);
+    if (parsed.name && parsed.name !== recipient) {
+      recipient = parsed.name;
+    }
 
     const msgEnvelope: MessageEnvelope = { ...baseEnvelope, to: recipient };
     // Pad timestamp for sorting: use millisecond epoch for lexicographic sort

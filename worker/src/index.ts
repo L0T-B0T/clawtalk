@@ -1,5 +1,5 @@
 import { Env } from "./types";
-import { handlePostAgent, handleGetAgents } from "./routes/agents";
+import { handlePostAgent, handleGetAgents, handlePatchAgent } from "./routes/agents";
 import {
   handlePostMessage,
   handleGetMessages,
@@ -15,7 +15,7 @@ import {
 function corsHeaders(): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Authorization, Content-Type",
   };
 }
@@ -59,6 +59,12 @@ export default {
         response = await handlePostAgent(request, env);
       } else if (path === "/agents" && request.method === "GET") {
         response = await handleGetAgents(request, env);
+      } else if (
+        path.startsWith("/agents/") &&
+        request.method === "PATCH"
+      ) {
+        const agentName = decodeURIComponent(path.slice("/agents/".length));
+        response = await handlePatchAgent(request, env, agentName);
       }
       // Messages
       else if (path === "/messages" && request.method === "POST") {

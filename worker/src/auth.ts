@@ -51,10 +51,11 @@ export async function hashApiKey(key: string): Promise<string> {
 export async function checkRateLimit(
   agentName: string,
   env: Env,
-  limit = 30
+  limit = 10
 ): Promise<boolean> {
-  const minute = Math.floor(Date.now() / 60000);
-  const key = `ratelimit:${agentName}:${minute}`;
+  // Use 10-second windows to reduce KV race condition impact
+  const window = Math.floor(Date.now() / 10000);
+  const key = `ratelimit:${agentName}:${window}`;
   const current = await env.MESSAGES.get(key);
   const count = current ? parseInt(current, 10) : 0;
 

@@ -74,6 +74,77 @@ export async function handlePostAgent(
   return Response.json({ name: body.name, apiKey }, { status: 201 });
 }
 
+export async function handlePatchAgent(
+  request: Request,
+  env: Env,
+  agentName: string
+): Promise<Response> {
+  // Agent can update own record, or admin can update any
+  const callerName = await validateAgentKey(request, env);
+  const isAdmin = await validateAdminKey(request, env);
+
+  if (!callerName && !isAdmin) {
+    return Response.json(
+      { error: "Unauthorized", code: "UNAUTHORIZED" },
+      { status: 401 }
+    );
+  }
+
+  // Non-admin can only update their own record
+  if (!isAdmin && callerName !== agentName) {
+    return Response.json(
+      { error: "Forbidden: can only update own agent", code: "FORBIDDEN" },
+      { status: 403 }
+    );
+  }
+
+  const raw = await env.AGENTS.get(`agent:${agentName}`);
+  if (!raw) {
+    return Response.json(
+      { error: "Agent not found", code: "NOT_FOUND" },
+      { status: 404 }
+    );
+  }
+
+  let body: {
+    webhookUrl?: string | null;
+    capabilities?: string[];
+    publicKey?: string;
+    signingKey?: string;
+  };
+
+  try {
+    body = await request.json();
+  } catch {
+    return Response.json(
+      { error: "Invalid JSON body", code: "BAD_REQUEST" },
+      { status: 400 }
+    );
+  }
+
+  const record: AgentRecord = JSON.parse(raw);
+
+  // Update allowed fields
+  if (body.webhookUrl !== undefined) {
+    record.webhookUrl = body.webhookUrl === null ? undefined : body.webhookUrl;
+  }
+  if (body.capabilities !== undefined) {
+    record.capabilities = body.capabilities;
+  }
+  if (body.publicKey !== undefined) {
+    record.publicKey = body.publicKey;
+  }
+  if (body.signingKey !== undefined) {
+    record.signingKey = body.signingKey;
+  }
+
+  record.lastSeen = new Date().toISOString();
+
+  await env.AGENTS.put(`agent:${agentName}`, JSON.stringify(record));
+
+  return Response.json({ name: agentName, updated: true });
+}
+
 export async function handleGetAgents(
   request: Request,
   env: Env

@@ -90,8 +90,7 @@ a{color:var(--cyan);text-decoration:none}
 .type-notification{background:rgba(255,170,0,.1);color:var(--yellow)}
 .type-other{background:rgba(170,102,255,.1);color:var(--purple)}
 .msg-topic{color:var(--yellow);font-size:11px}
-.msg-payload{color:var(--text2);font-size:11px;margin-top:3px;cursor:pointer;word-break:break-all}
-.msg-payload.expanded{white-space:pre-wrap}
+.msg-payload{color:var(--text2);font-size:11px;margin-top:3px;white-space:pre-wrap;word-break:break-word}
 .msg-encrypted{color:var(--yellow);font-size:11px}
 .msg-feed{max-height:500px;overflow-y:auto}
 .no-data{color:var(--text2);text-align:center;padding:20px;font-style:italic}
@@ -383,8 +382,7 @@ function renderMessages(){
     if(m.encrypted)payload=`<div class="msg-encrypted">🔒 [encrypted]</div>`;
     else if(m.payload){
       const s=typeof m.payload==='string'?m.payload:JSON.stringify(m.payload);
-      const trunc=s.length>100?s.slice(0,100)+'…':s;
-      payload=`<div class="msg-payload" onclick="this.classList.toggle('expanded');this.textContent=this.classList.contains('expanded')?${JSON.stringify(JSON.stringify(s))}:${JSON.stringify(JSON.stringify(trunc))}">${esc(trunc)}</div>`;
+      payload=`<div class="msg-payload">${esc(s)}</div>`;
     }
     return `<div class="msg-item">
       <div class="msg-meta">
@@ -406,8 +404,7 @@ function renderAudit(){
     let payload='';
     if(e.payload){
       const s=typeof e.payload==='string'?e.payload:JSON.stringify(e.payload);
-      const trunc=s.length>100?s.slice(0,100)+'…':s;
-      payload=`<div class="audit-payload" onclick="this.classList.toggle('expanded');this.textContent=this.classList.contains('expanded')?${JSON.stringify(JSON.stringify(s))}:${JSON.stringify(JSON.stringify(trunc))}">${esc(trunc)}</div>`;
+      payload=`<div class="msg-payload">${esc(s)}</div>`;
     }
     return `<div class="audit-item">
       <span class="audit-dir">${dir}</span>
