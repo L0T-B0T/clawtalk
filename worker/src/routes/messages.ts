@@ -1,5 +1,5 @@
 import { Env, MessageEnvelope, SendMessageBody, AgentRecord } from "../types";
-import { validateAgentKey, checkRateLimit } from "../auth";
+import { validateAgentKey, validateAdminKey, checkRateLimit } from "../auth";
 
 const MAX_MESSAGE_SIZE = 64 * 1024; // 64KB
 const DEFAULT_TTL = 86400; // 1 day
@@ -17,7 +17,8 @@ async function updateLastSeen(agentName: string, env: Env): Promise<void> {
 
 export async function handlePostMessage(
   request: Request,
-  env: Env
+  env: Env,
+  ctx: ExecutionContext
 ): Promise<Response> {
   const senderName = await validateAgentKey(request, env);
   if (!senderName) {
@@ -123,6 +124,28 @@ export async function handlePostMessage(
     await env.MESSAGES.put(key, JSON.stringify(msgEnvelope), {
       expirationTtl: ttl,
     });
+
+    // Also store in global log for admin monitoring
+    const globalKey = `global:${sortableTs}:${msgId}:${recipient}`;
+    await env.MESSAGES.put(globalKey, JSON.stringify(msgEnvelope), {
+      expirationTtl: ttl,
+    });
+
+    // Webhook delivery (fire-and-forget)
+    const recipientRaw = await env.AGENTS.get(`agent:${recipient}`);
+    if (recipientRaw) {
+      const recipientAgent: AgentRecord = JSON.parse(recipientRaw);
+      if (recipientAgent.webhookUrl) {
+        // Fire-and-forget — don't block on delivery
+        ctx.waitUntil(
+          fetch(recipientAgent.webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(msgEnvelope),
+          }).catch(() => {}) // silently ignore webhook failures
+        );
+      }
+    }
   }
 
   await updateLastSeen(senderName, env);
@@ -134,8 +157,10 @@ export async function handleGetMessages(
   request: Request,
   env: Env
 ): Promise<Response> {
-  const agentName = await validateAgentKey(request, env);
-  if (!agentName) {
+  // Support both agent key (inbox only) and admin key (global view)
+  const isAdmin = await validateAdminKey(request, env);
+  const agentName = isAdmin ? null : await validateAgentKey(request, env);
+  if (!isAdmin && !agentName) {
     return Response.json(
       { error: "Unauthorized", code: "UNAUTHORIZED" },
       { status: 401 }
@@ -150,7 +175,8 @@ export async function handleGetMessages(
   );
   const topic = url.searchParams.get("topic");
 
-  const prefix = `msg:${agentName}:`;
+  // Admin sees all messages via global log; agents see their inbox
+  const prefix = isAdmin ? "global:" : `msg:${agentName}:`;
   const list = await env.MESSAGES.list({ prefix, limit: 1000 });
 
   const messages: MessageEnvelope[] = [];
@@ -170,7 +196,7 @@ export async function handleGetMessages(
     messages.push(msg);
   }
 
-  await updateLastSeen(agentName, env);
+  if (agentName) await updateLastSeen(agentName, env);
 
   const cursor =
     messages.length > 0 ? messages[messages.length - 1].ts : undefined;

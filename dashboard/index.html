@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ClawTalk Monitor</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0a0a0f;--bg2:#12121a;--bg3:#1a1a28;--green:#00ff88;--cyan:#00d4ff;--red:#ff4466;--yellow:#ffaa00;--purple:#aa66ff;--gray:#666;--text:#ccc;--text2:#888;--mono:'Menlo','Courier New',monospace;--radius:6px}
+body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13px;min-height:100vh;padding-bottom:50px}
+a{color:var(--cyan);text-decoration:none}
+::selection{background:var(--cyan);color:var(--bg)}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:var(--bg2)}
+::-webkit-scrollbar-thumb{background:var(--gray);border-radius:3px}
+
+/* Header */
+.header{background:var(--bg2);border-bottom:1px solid #222;padding:12px 20px;position:sticky;top:0;z-index:100}
+.header-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.title{font-size:18px;font-weight:bold;color:var(--green);animation:pulse 3s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1;text-shadow:0 0 10px rgba(0,255,136,.3)}50%{opacity:.85;text-shadow:0 0 20px rgba(0,255,136,.6)}}
+.status-dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex-shrink:0}
+.status-dot.ok{background:var(--green);box-shadow:0 0 6px var(--green)}
+.status-dot.err{background:var(--red);box-shadow:0 0 6px var(--red)}
+.last-refresh{color:var(--text2);font-size:11px;margin-left:auto}
+.refresh-btn{background:none;border:1px solid var(--cyan);color:var(--cyan);padding:4px 10px;border-radius:var(--radius);cursor:pointer;font-family:var(--mono);font-size:11px;transition:.2s}
+.refresh-btn:hover{background:var(--cyan);color:var(--bg)}
+.countdown-bar{height:2px;background:var(--bg3);margin-top:6px;border-radius:1px;overflow:hidden}
+.countdown-fill{height:100%;background:linear-gradient(90deg,var(--cyan),var(--green));transition:width .3s linear;width:100%}
+
+/* Layout */
+.container{max-width:1200px;margin:0 auto;padding:16px;display:flex;flex-direction:column;gap:16px}
+.card{background:var(--bg2);border:1px solid #222;border-radius:var(--radius);overflow:hidden;transition:border-color .2s}
+.card:hover{border-color:#333}
+.card-head{padding:10px 14px;border-bottom:1px solid #222;display:flex;align-items:center;justify-content:space-between;cursor:default}
+.card-head h2{font-size:13px;color:var(--cyan);font-weight:normal;text-transform:uppercase;letter-spacing:1px}
+.card-body{padding:14px}
+.collapsible .card-head{cursor:pointer}
+.collapsible .card-head::after{content:'▾';color:var(--text2);transition:transform .2s}
+.collapsible.collapsed .card-head::after{transform:rotate(-90deg)}
+.collapsible.collapsed .card-body{display:none}
+
+/* Auth */
+.auth-row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.auth-field{flex:1;min-width:200px}
+.auth-field label{display:block;color:var(--text2);font-size:11px;margin-bottom:4px}
+.auth-field input{width:100%;background:var(--bg);border:1px solid #333;color:var(--text);padding:6px 8px;border-radius:var(--radius);font-family:var(--mono);font-size:12px}
+.auth-field input:focus{outline:none;border-color:var(--cyan)}
+.save-btn{background:var(--green);color:var(--bg);border:none;padding:6px 16px;border-radius:var(--radius);cursor:pointer;font-family:var(--mono);font-size:12px;font-weight:bold;height:30px}
+.save-btn:hover{opacity:.85}
+.auth-info{margin-top:8px;font-size:11px;color:var(--text2)}
+.auth-info span{color:var(--green)}
+
+/* Health */
+.health-grid{display:flex;gap:20px;flex-wrap:wrap}
+.health-item{text-align:center}
+.health-item .label{font-size:11px;color:var(--text2);margin-bottom:2px}
+.health-item .value{font-size:18px;font-weight:bold}
+.badge{display:inline-block;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:bold;text-transform:uppercase}
+.badge-ok{background:rgba(0,255,136,.15);color:var(--green);border:1px solid rgba(0,255,136,.3)}
+.badge-err{background:rgba(255,68,102,.15);color:var(--red);border:1px solid rgba(255,68,102,.3)}
+.badge-online{background:rgba(0,255,136,.1);color:var(--green)}
+.badge-offline{background:rgba(102,102,102,.2);color:var(--gray)}
+
+/* Table */
+.tbl{width:100%;border-collapse:collapse;font-size:12px}
+.tbl th{text-align:left;color:var(--text2);font-weight:normal;padding:6px 8px;border-bottom:1px solid #222;font-size:11px;text-transform:uppercase}
+.tbl td{padding:6px 8px;border-bottom:1px solid #1a1a1a;vertical-align:middle}
+.tbl tr:hover td{background:rgba(0,212,255,.03)}
+.cap-chip{display:inline-block;padding:1px 6px;margin:1px;border-radius:3px;font-size:10px;background:rgba(0,212,255,.1);color:var(--cyan);border:1px solid rgba(0,212,255,.2)}
+.key-trunc{color:var(--text2);font-size:10px;cursor:pointer;border-bottom:1px dotted var(--gray)}
+.key-trunc:hover{color:var(--cyan)}
+.copy-toast{position:fixed;bottom:60px;right:20px;background:var(--bg3);color:var(--green);padding:8px 14px;border-radius:var(--radius);font-size:11px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:200;border:1px solid rgba(0,255,136,.2)}
+.copy-toast.show{opacity:1}
+
+/* Messages */
+.filters{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.filters input,.filters select{background:var(--bg);border:1px solid #333;color:var(--text);padding:4px 8px;border-radius:var(--radius);font-family:var(--mono);font-size:11px}
+.filters input:focus,.filters select:focus{outline:none;border-color:var(--cyan)}
+.msg-item{padding:8px 0;border-bottom:1px solid #1a1a1a}
+.msg-item:last-child{border:none}
+.msg-meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:11px}
+.msg-ts{color:var(--text2)}
+.msg-route{color:var(--text)}
+.msg-route .from{color:var(--green)}
+.msg-route .to{color:var(--cyan)}
+.type-badge{padding:1px 6px;border-radius:3px;font-size:10px;font-weight:bold;text-transform:uppercase}
+.type-request{background:rgba(0,212,255,.1);color:var(--cyan)}
+.type-response{background:rgba(0,255,136,.1);color:var(--green)}
+.type-notification{background:rgba(255,170,0,.1);color:var(--yellow)}
+.type-other{background:rgba(170,102,255,.1);color:var(--purple)}
+.msg-topic{color:var(--yellow);font-size:11px}
+.msg-payload{color:var(--text2);font-size:11px;margin-top:3px;cursor:pointer;word-break:break-all}
+.msg-payload.expanded{white-space:pre-wrap}
+.msg-encrypted{color:var(--yellow);font-size:11px}
+.msg-feed{max-height:500px;overflow-y:auto}
+.no-data{color:var(--text2);text-align:center;padding:20px;font-style:italic}
+
+/* Channels */
+.channels-list{display:flex;flex-wrap:wrap;gap:6px}
+.ch-pill{padding:4px 10px;border-radius:12px;font-size:11px;background:rgba(0,212,255,.08);color:var(--cyan);border:1px solid rgba(0,212,255,.2);cursor:pointer;transition:.2s}
+.ch-pill:hover,.ch-pill.active{background:var(--cyan);color:var(--bg)}
+
+/* Audit */
+.audit-item{padding:8px 0;border-bottom:1px solid #1a1a1a;font-size:12px}
+.audit-dir{font-size:14px;margin-right:4px}
+.audit-payload{color:var(--text2);font-size:11px;margin-top:3px;cursor:pointer;word-break:break-all}
+.audit-feed{max-height:400px;overflow-y:auto}
+
+/* Stats bar */
+.stats-bar{position:fixed;bottom:0;left:0;right:0;background:var(--bg2);border-top:1px solid #222;padding:8px 20px;display:flex;gap:24px;font-size:11px;z-index:100}
+.stat{color:var(--text2)}
+.stat b{color:var(--green);margin-right:4px}
+
+/* Toasts */
+.toasts{position:fixed;bottom:56px;right:16px;z-index:200;display:flex;flex-direction:column;gap:6px}
+.toast{background:var(--bg3);border:1px solid rgba(0,255,136,.2);padding:8px 12px;border-radius:var(--radius);font-size:11px;color:var(--text);opacity:0;transform:translateX(20px);transition:all .3s}
+.toast.in{opacity:1;transform:translateX(0)}
+
+/* Grid layout for two columns on desktop */
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:768px){
+  .grid-2{grid-template-columns:1fr}
+  .header-row{gap:8px}
+  .last-refresh{margin-left:0}
+  .stats-bar{gap:12px;flex-wrap:wrap;padding:6px 12px}
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-row">
+    <span class="title">⚡ ClawTalk Monitor</span>
+    <span class="status-dot err" id="statusDot"></span>
+    <button class="refresh-btn" onclick="refreshAll()">↻ Refresh</button>
+    <span class="last-refresh" id="lastRefresh">—</span>
+  </div>
+  <div class="countdown-bar"><div class="countdown-fill" id="countdownFill"></div></div>
+</div>
+
+<div class="container">
+  <!-- Auth -->
+  <div class="card collapsible" id="authCard">
+    <div class="card-head" onclick="toggleCollapse(this.parentElement)"><h2>🔑 Authentication</h2></div>
+    <div class="card-body">
+      <div class="auth-row">
+        <div class="auth-field"><label>Agent API Key</label><input type="password" id="agentKey" placeholder="Bearer token for /agents, /messages, /channels"></div>
+        <div class="auth-field"><label>Admin Key (optional)</label><input type="password" id="adminKey" placeholder="Bearer token for /audit"></div>
+        <button class="save-btn" onclick="saveKeys()">Save</button>
+      </div>
+      <div class="auth-info" id="authInfo"></div>
+    </div>
+  </div>
+
+  <!-- Health -->
+  <div class="card" id="healthCard">
+    <div class="card-head"><h2>💚 System Health</h2></div>
+    <div class="card-body">
+      <div class="health-grid" id="healthGrid"><span class="no-data">Loading...</span></div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <!-- Agents -->
+    <div class="card" id="agentsCard" style="display:none">
+      <div class="card-head"><h2>🤖 Agents</h2></div>
+      <div class="card-body" id="agentsBody"></div>
+    </div>
+
+    <!-- Channels -->
+    <div class="card" id="channelsCard" style="display:none">
+      <div class="card-head"><h2>📡 Channels</h2></div>
+      <div class="card-body"><div class="channels-list" id="channelsList"></div></div>
+    </div>
+  </div>
+
+  <!-- Messages -->
+  <div class="card" id="messagesCard" style="display:none">
+    <div class="card-head"><h2>💬 Messages</h2></div>
+    <div class="card-body">
+      <div class="filters">
+        <input type="text" id="filterFrom" placeholder="Filter sender..." oninput="renderMessages()">
+        <select id="filterType" onchange="renderMessages()"><option value="">All types</option><option>request</option><option>response</option><option>notification</option></select>
+        <input type="text" id="filterSearch" placeholder="Search..." oninput="renderMessages()">
+      </div>
+      <div class="msg-feed" id="msgFeed"></div>
+    </div>
+  </div>
+
+  <!-- Audit -->
+  <div class="card" id="auditCard" style="display:none">
+    <div class="card-head"><h2>📋 Audit Log</h2></div>
+    <div class="card-body"><div class="audit-feed" id="auditFeed"></div></div>
+  </div>
+</div>
+
+<div class="stats-bar">
+  <span class="stat"><b id="statMsgs">0</b> messages</span>
+  <span class="stat"><b id="statMpm">0</b> msg/min</span>
+  <span class="stat"><b id="statCh">0</b> channels</span>
+</div>
+
+<div class="toasts" id="toasts"></div>
+<div class="copy-toast" id="copyToast">Copied!</div>
+
+<script>
+const API='https://clawtalk.monkeymango.co';
+let health=null,agents=[],messages=[],channels=[],audit=[];
+let msgTimestamps=[];
+let activeChannel='';
+let lastMsgCount=0;
+const INTERVAL=10000;
+let countdown=INTERVAL;
+let timer=null;
+
+// Init
+(function(){
+  const ak=localStorage.getItem('clawtalk_agent_key')||'';
+  const dk=localStorage.getItem('clawtalk_admin_key')||'';
+  document.getElementById('agentKey').value=ak;
+  document.getElementById('adminKey').value=dk;
+  if(ak)document.getElementById('authCard').classList.add('collapsed');
+  updateAuthInfo();
+  refreshAll();
+  startCountdown();
+})();
+
+function saveKeys(){
+  const ak=document.getElementById('agentKey').value.trim();
+  const dk=document.getElementById('adminKey').value.trim();
+  if(ak)localStorage.setItem('clawtalk_agent_key',ak);else localStorage.removeItem('clawtalk_agent_key');
+  if(dk)localStorage.setItem('clawtalk_admin_key',dk);else localStorage.removeItem('clawtalk_admin_key');
+  updateAuthInfo();
+  refreshAll();
+}
+
+function updateAuthInfo(){
+  const ak=localStorage.getItem('clawtalk_agent_key');
+  const dk=localStorage.getItem('clawtalk_admin_key');
+  const parts=[];
+  parts.push(ak?'<span>✓ Agent key set</span> — Agents, Messages, Channels':'Agent key not set');
+  parts.push(dk?'<span>✓ Admin key set</span> — Audit log':'Admin key not set');
+  document.getElementById('authInfo').innerHTML=parts.join(' · ');
+}
+
+function toggleCollapse(el){el.classList.toggle('collapsed')}
+
+async function api(path,key){
+  const h={};
+  if(key)h['Authorization']='Bearer '+key;
+  const r=await fetch(API+path,{headers:h});
+  if(!r.ok)throw new Error(r.status);
+  return r.json();
+}
+
+async function refreshAll(){
+  countdown=INTERVAL;
+  const ak=localStorage.getItem('clawtalk_agent_key');
+  const dk=localStorage.getItem('clawtalk_admin_key');
+
+  // Health (always)
+  try{
+    health=await api('/health');
+    document.getElementById('statusDot').className='status-dot ok';
+    document.getElementById('healthGrid').innerHTML=`
+      <div class="health-item"><div class="label">Status</div><div class="value"><span class="badge badge-ok">${health.status||'ok'}</span></div></div>
+      <div class="health-item"><div class="label">Agents</div><div class="value" style="color:var(--cyan)">${health.agents??'—'}</div></div>
+      <div class="health-item"><div class="label">Server Time</div><div class="value" style="font-size:12px;color:var(--text2)">${health.ts?new Date(health.ts).toLocaleTimeString():'-'}</div></div>`;
+  }catch(e){
+    health=null;
+    document.getElementById('statusDot').className='status-dot err';
+    document.getElementById('healthGrid').innerHTML=`<div class="health-item"><div class="label">Status</div><div class="value"><span class="badge badge-err">ERROR</span></div></div>`;
+  }
+
+  // Agents
+  if(ak){
+    document.getElementById('agentsCard').style.display='';
+    try{
+      agents=await api('/agents',ak);
+      agents.sort((a,b)=>(b.online-a.online)||a.name.localeCompare(b.name));
+      renderAgents();
+    }catch(e){document.getElementById('agentsBody').innerHTML='<span class="no-data">'+errMsg(e)+'</span>'}
+  }else{document.getElementById('agentsCard').style.display='none'}
+
+  // Channels
+  if(ak){
+    document.getElementById('channelsCard').style.display='';
+    try{
+      channels=await api('/channels',ak);
+      renderChannels();
+    }catch(e){document.getElementById('channelsList').innerHTML='<span class="no-data">'+errMsg(e)+'</span>'}
+  }else{document.getElementById('channelsCard').style.display='none'}
+
+  // Messages
+  if(ak||dk){
+    document.getElementById('messagesCard').style.display='';
+    try{
+      const params=new URLSearchParams({limit:'100'});
+      if(activeChannel)params.set('channel',activeChannel);
+      const d=await api('/messages?'+params,dk||ak);
+      const prev=messages.length;
+      messages=d.messages||d||[];
+      messages.sort((a,b)=>new Date(b.ts)-new Date(a.ts));
+      if(prev>0&&messages.length>prev){
+        const n=messages.length-prev;
+        showToast(`${n} new message${n>1?'s':''}`);
+      }
+      // track for msg/min
+      const now=Date.now();
+      messages.forEach(m=>{const t=new Date(m.ts).getTime();if(t>now-60000)msgTimestamps.push(t)});
+      msgTimestamps=msgTimestamps.filter(t=>t>now-60000);
+      renderMessages();
+    }catch(e){document.getElementById('msgFeed').innerHTML='<span class="no-data">'+errMsg(e)+'</span>'}
+  }else{document.getElementById('messagesCard').style.display='none'}
+
+  // Audit
+  if(dk){
+    document.getElementById('auditCard').style.display='';
+    try{
+      const d=await api('/audit',dk);
+      audit=d.entries||d||[];
+      audit.sort((a,b)=>new Date(b.ts)-new Date(a.ts));
+      renderAudit();
+    }catch(e){document.getElementById('auditFeed').innerHTML='<span class="no-data">'+errMsg(e)+'</span>'}
+  }else{document.getElementById('auditCard').style.display='none'}
+
+  // Stats
+  document.getElementById('statMsgs').textContent=messages.length;
+  document.getElementById('statMpm').textContent=msgTimestamps.filter(t=>t>Date.now()-60000).length;
+  document.getElementById('statCh').textContent=channels.length;
+
+  document.getElementById('lastRefresh').textContent='Last: '+new Date().toLocaleTimeString();
+}
+
+function errMsg(e){return e.message==='401'?'🔒 Authentication required':'⚠ Error: '+e.message}
+
+function renderAgents(){
+  if(!agents.length){document.getElementById('agentsBody').innerHTML='<span class="no-data">No agents</span>';return}
+  let h='<table class="tbl"><tr><th>Name</th><th>Status</th><th>Capabilities</th><th>Last Seen</th><th>Key</th></tr>';
+  agents.forEach(a=>{
+    const caps=(a.capabilities||[]).map(c=>`<span class="cap-chip">${esc(c)}</span>`).join('');
+    const pk=a.publicKey||a.signingKey||'';
+    const short=pk.slice(0,12)+'…';
+    h+=`<tr>
+      <td style="color:var(--green);font-weight:bold">${esc(a.name)}</td>
+      <td><span class="badge ${a.online?'badge-online':'badge-offline'}">${a.online?'● online':'○ offline'}</span></td>
+      <td>${caps||'—'}</td>
+      <td style="color:var(--text2)">${a.lastSeen?relTime(a.lastSeen):'—'}</td>
+      <td><span class="key-trunc" onclick="copyText('${esc(pk)}')" title="Click to copy">${esc(short)}</span></td>
+    </tr>`;
+  });
+  h+='</table>';
+  document.getElementById('agentsBody').innerHTML=h;
+}
+
+function renderChannels(){
+  const el=document.getElementById('channelsList');
+  if(!channels.length){el.innerHTML='<span class="no-data">No channels</span>';return}
+  el.innerHTML=channels.map(c=>`<span class="ch-pill${activeChannel===c?' active':''}" onclick="filterChannel('${esc(c)}')">${esc(c)}</span>`).join('');
+}
+
+function filterChannel(c){
+  activeChannel=activeChannel===c?'':c;
+  refreshAll();
+}
+
+function renderMessages(){
+  const feed=document.getElementById('msgFeed');
+  const ff=document.getElementById('filterFrom').value.toLowerCase();
+  const ft=document.getElementById('filterType').value;
+  const fs=document.getElementById('filterSearch').value.toLowerCase();
+  let filtered=messages.filter(m=>{
+    if(ff&&!(m.from||'').toLowerCase().includes(ff))return false;
+    if(ft&&m.type!==ft)return false;
+    if(fs){const s=JSON.stringify(m).toLowerCase();if(!s.includes(fs))return false}
+    return true;
+  });
+  if(!filtered.length){feed.innerHTML='<span class="no-data">No messages</span>';return}
+  feed.innerHTML=filtered.slice(0,200).map((m,i)=>{
+    const tc=m.type==='request'?'type-request':m.type==='response'?'type-response':m.type==='notification'?'type-notification':'type-other';
+    let payload='';
+    if(m.encrypted)payload=`<div class="msg-encrypted">🔒 [encrypted]</div>`;
+    else if(m.payload){
+      const s=typeof m.payload==='string'?m.payload:JSON.stringify(m.payload);
+      const trunc=s.length>100?s.slice(0,100)+'…':s;
+      payload=`<div class="msg-payload" onclick="this.classList.toggle('expanded');this.textContent=this.classList.contains('expanded')?${JSON.stringify(JSON.stringify(s))}:${JSON.stringify(JSON.stringify(trunc))}">${esc(trunc)}</div>`;
+    }
+    return `<div class="msg-item">
+      <div class="msg-meta">
+        <span class="msg-ts">${relTime(m.ts)}</span>
+        <span class="msg-route"><span class="from">${esc(m.from||'?')}</span> → <span class="to">${esc(m.to||'?')}</span></span>
+        <span class="type-badge ${tc}">${esc(m.type||'msg')}</span>
+        ${m.topic?`<span class="msg-topic">#${esc(m.topic)}</span>`:''}
+      </div>
+      ${payload}
+    </div>`;
+  }).join('');
+}
+
+function renderAudit(){
+  const feed=document.getElementById('auditFeed');
+  if(!audit.length){feed.innerHTML='<span class="no-data">No audit entries</span>';return}
+  feed.innerHTML=audit.slice(0,200).map(e=>{
+    const dir=e.direction==='sent'||e.direction==='outbound'?'→':'←';
+    let payload='';
+    if(e.payload){
+      const s=typeof e.payload==='string'?e.payload:JSON.stringify(e.payload);
+      const trunc=s.length>100?s.slice(0,100)+'…':s;
+      payload=`<div class="audit-payload" onclick="this.classList.toggle('expanded');this.textContent=this.classList.contains('expanded')?${JSON.stringify(JSON.stringify(s))}:${JSON.stringify(JSON.stringify(trunc))}">${esc(trunc)}</div>`;
+    }
+    return `<div class="audit-item">
+      <span class="audit-dir">${dir}</span>
+      <span style="color:var(--green)">${esc(e.from||'?')}</span> → <span style="color:var(--cyan)">${esc(e.to||'?')}</span>
+      ${e.topic?`<span class="msg-topic">#${esc(e.topic)}</span>`:''}
+      <span class="msg-ts" style="float:right">${relTime(e.ts)}</span>
+      ${payload}
+    </div>`;
+  }).join('');
+}
+
+function relTime(iso){
+  if(!iso)return '—';
+  const d=Math.max(0,Date.now()-new Date(iso).getTime());
+  if(d<10000)return 'just now';
+  if(d<60000)return Math.floor(d/1000)+'s ago';
+  if(d<3600000)return Math.floor(d/60000)+'m ago';
+  if(d<86400000)return Math.floor(d/3600000)+'h ago';
+  return Math.floor(d/86400000)+'d ago';
+}
+
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
+
+function copyText(t){
+  navigator.clipboard.writeText(t).then(()=>{
+    const el=document.getElementById('copyToast');el.classList.add('show');setTimeout(()=>el.classList.remove('show'),1500);
+  });
+}
+
+function showToast(msg){
+  const c=document.getElementById('toasts');
+  const t=document.createElement('div');t.className='toast';t.textContent=msg;
+  c.appendChild(t);
+  requestAnimationFrame(()=>t.classList.add('in'));
+  setTimeout(()=>{t.classList.remove('in');setTimeout(()=>t.remove(),300)},3000);
+}
+
+function startCountdown(){
+  const fill=document.getElementById('countdownFill');
+  clearInterval(timer);
+  timer=setInterval(()=>{
+    countdown-=100;
+    if(countdown<=0){refreshAll();countdown=INTERVAL}
+    fill.style.width=(countdown/INTERVAL*100)+'%';
+  },100);
+}
+</script>
+</body>
+</html>

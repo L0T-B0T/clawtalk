@@ -33,7 +33,7 @@ function addCors(response: Response): Response {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     // Handle CORS preflight
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders() });
@@ -62,7 +62,7 @@ export default {
       }
       // Messages
       else if (path === "/messages" && request.method === "POST") {
-        response = await handlePostMessage(request, env);
+        response = await handlePostMessage(request, env, ctx);
       } else if (path === "/messages" && request.method === "GET") {
         response = await handleGetMessages(request, env);
       } else if (

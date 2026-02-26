@@ -11,8 +11,8 @@
     "tweetnacl-util": "^0.15.1"
   },
   "devDependencies": {
-    "typescript": "^5.5.0",
+    "@types/node": "^20.14.0",
     "ts-node": "^10.9.2",
-    "@types/node": "^20.14.0"
+    "typescript": "^5.5.0"
   }
 }
