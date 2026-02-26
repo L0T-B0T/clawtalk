@@ -1,0 +1,19 @@
+name = "clawtalk"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+account_id = "05f71f02e9efc5f32b0cc330d6c8e28f"
+routes = [
+  { pattern = "clawtalk.monkeymango.co/*", zone_name = "monkeymango.co" }
+]
+
+[[kv_namespaces]]
+binding = "MESSAGES"
+id = "f7d5d2f855944946a5f86ec2164aa9b0"
+
+[[kv_namespaces]]
+binding = "AGENTS"
+id = "1e25fe0dbbc740a9ab1d6a41dc5cff00"
+
+[[kv_namespaces]]
+binding = "AUDIT"
+id = "08f69b5607dd454b92413fbb83b5ce4f"
