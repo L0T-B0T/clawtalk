@@ -1,5 +1,6 @@
 import { Env, AuditEntry } from "../types";
 import { validateAgentKey, validateAdminKey } from "../auth";
+import { getCached, setCache, invalidate } from "../cache";
 
 const MAX_PAYLOAD_SIZE = 64 * 1024; // 64KB
 const AUDIT_TTL = 2592000; // 30 days
@@ -91,6 +92,7 @@ export async function handlePostAudit(
   await env.AUDIT.put(key, JSON.stringify(entry), {
     expirationTtl: AUDIT_TTL,
   });
+  invalidate("audit:");
 
   return Response.json({ ok: true }, { status: 201 });
 }
@@ -116,12 +118,18 @@ export async function handleGetAudit(
   const toFilter = url.searchParams.get("to");
   const topicFilter = url.searchParams.get("topic");
 
-  const list = await env.AUDIT.list({ prefix: "audit:", limit: 1000 });
+  const cacheKey = "audit:keys";
+  let auditKeys = getCached<{ name: string }[]>(cacheKey);
+  if (!auditKeys) {
+    const list = await env.AUDIT.list({ prefix: "audit:", limit: 1000 });
+    auditKeys = [...list.keys];
+    setCache(cacheKey, auditKeys, 30_000); // 30s cache
+  }
 
   const sinceTime = since ? new Date(since).getTime() : 0;
   const entries: AuditEntry[] = [];
 
-  for (const key of list.keys) {
+  for (const key of auditKeys) {
     if (entries.length >= limit) break;
 
     const raw = await env.AUDIT.get(key.name);
@@ -165,7 +173,9 @@ export async function handleDeleteAudit(
   }
 
   const beforeTime = new Date(before).getTime();
+  // Delete must use fresh list (not cached) to avoid missing entries
   const list = await env.AUDIT.list({ prefix: "audit:", limit: 1000 });
+  invalidate("audit:");
 
   let deleted = 0;
   for (const key of list.keys) {

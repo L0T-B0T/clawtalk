@@ -11,6 +11,7 @@ import {
   handleGetAudit,
   handleDeleteAudit,
 } from "./routes/audit";
+import { getCached, setCache } from "./cache";
 
 function corsHeaders(): Record<string, string> {
   return {
@@ -45,13 +46,18 @@ export default {
     let response: Response;
 
     try {
-      // Health check
+      // Health check (cached 60s to save list() ops)
       if (path === "/health" && request.method === "GET") {
-        const list = await env.AGENTS.list({ prefix: "agent:" });
+        let agentCount = getCached<number>("health:agentCount");
+        if (agentCount === null) {
+          const list = await env.AGENTS.list({ prefix: "agent:" });
+          agentCount = list.keys.length;
+          setCache("health:agentCount", agentCount, 60_000);
+        }
         response = Response.json({
           status: "ok",
           ts: new Date().toISOString(),
-          agents: list.keys.length,
+          agents: agentCount,
         });
       }
       // Agents

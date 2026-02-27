@@ -1,5 +1,6 @@
 import { Env, MessageEnvelope, SendMessageBody, AgentRecord } from "../types";
 import { validateAgentKey, validateAdminKey, checkRateLimit } from "../auth";
+import { getCached, setCache, invalidate } from "../cache";
 
 const MAX_MESSAGE_SIZE = 64 * 1024; // 64KB
 const DEFAULT_TTL = 86400; // 1 day
@@ -70,15 +71,16 @@ export async function handlePostMessage(
     );
   }
 
-  // Resolve recipients
+  // Resolve recipients (cache agent names for broadcast)
   let recipients: string[];
   if (body.to === "broadcast") {
-    const list = await env.AGENTS.list({ prefix: "agent:" });
-    recipients = [];
-    for (const key of list.keys) {
-      const name = key.name.slice("agent:".length);
-      if (name !== senderName) recipients.push(name);
+    let agentNames = getCached<string[]>("agents:names");
+    if (!agentNames) {
+      const list = await env.AGENTS.list({ prefix: "agent:" });
+      agentNames = list.keys.map((k) => k.name.slice("agent:".length));
+      setCache("agents:names", agentNames, 60_000);
     }
+    recipients = agentNames.filter((n) => n !== senderName);
   } else if (Array.isArray(body.to)) {
     recipients = body.to;
   } else {
@@ -115,15 +117,19 @@ export async function handlePostMessage(
     // Case-insensitive recipient lookup: try exact, then scan agents
     let recipientRecord = await env.AGENTS.get(`agent:${recipient}`);
     if (!recipientRecord) {
-      // Try case-insensitive match
-      const agentList = await env.AGENTS.list({ prefix: "agent:" });
-      for (const k of agentList.keys) {
-        const name = k.name.slice("agent:".length);
-        if (name.toLowerCase() === recipient.toLowerCase()) {
-          recipient = name; // use canonical casing
-          recipientRecord = await env.AGENTS.get(k.name);
-          break;
-        }
+      // Try case-insensitive match (cached agent names)
+      let agentNames = getCached<string[]>("agents:names");
+      if (!agentNames) {
+        const agentList = await env.AGENTS.list({ prefix: "agent:" });
+        agentNames = agentList.keys.map((k) => k.name.slice("agent:".length));
+        setCache("agents:names", agentNames, 60_000);
+      }
+      const match = agentNames.find(
+        (n) => n.toLowerCase() === recipient.toLowerCase()
+      );
+      if (match) {
+        recipient = match;
+        recipientRecord = await env.AGENTS.get(`agent:${match}`);
       }
       if (!recipientRecord) continue;
     }
@@ -166,6 +172,8 @@ export async function handlePostMessage(
   }
 
   await updateLastSeen(senderName, env);
+  invalidate("messages:");
+  invalidate("agents:"); // lastSeen changed
 
   return Response.json({ id: msgId, ts }, { status: 201 });
 }
@@ -194,12 +202,18 @@ export async function handleGetMessages(
 
   // Admin sees all messages via global log; agents see their inbox
   const prefix = isAdmin ? "global:" : `msg:${agentName}:`;
-  const list = await env.MESSAGES.list({ prefix, limit: 1000 });
+  const cacheKey = `messages:keys:${prefix}`;
+  let allKeys = getCached<{ name: string }[]>(cacheKey);
+  if (!allKeys) {
+    const list = await env.MESSAGES.list({ prefix, limit: 1000 });
+    allKeys = [...list.keys].reverse();
+    setCache(cacheKey, allKeys, 15_000); // 15s cache
+  }
 
   const messages: MessageEnvelope[] = [];
   const sinceTime = since ? new Date(since).getTime() : 0;
 
-  for (const key of list.keys) {
+  for (const key of allKeys) {
     if (messages.length >= limit) break;
 
     const raw = await env.MESSAGES.get(key.name);
@@ -234,14 +248,21 @@ export async function handleDeleteMessage(
     );
   }
 
-  // Find the message key belonging to this agent
+  // Find the message key belonging to this agent (cached key list)
   const prefix = `msg:${agentName}:`;
-  const list = await env.MESSAGES.list({ prefix, limit: 1000 });
+  const cacheKey = `messages:keys:${prefix}`;
+  let keyList = getCached<{ name: string }[]>(cacheKey);
+  if (!keyList) {
+    const list = await env.MESSAGES.list({ prefix, limit: 1000 });
+    keyList = [...list.keys];
+    setCache(cacheKey, keyList, 15_000);
+  }
 
   let found = false;
-  for (const key of list.keys) {
+  for (const key of keyList) {
     if (key.name.endsWith(`:${messageId}`)) {
       await env.MESSAGES.delete(key.name);
+      invalidate("messages:");
       found = true;
       break;
     }
@@ -269,16 +290,20 @@ export async function handleGetChannels(
     );
   }
 
-  // Scan messages for unique topics/channels
-  const list = await env.MESSAGES.list({ prefix: "msg:", limit: 1000 });
-  const channels = new Set<string>();
-
-  for (const key of list.keys) {
-    const raw = await env.MESSAGES.get(key.name);
-    if (!raw) continue;
-    const msg: MessageEnvelope = JSON.parse(raw);
-    if (msg.topic) channels.add(msg.topic);
+  // Scan messages for unique topics/channels (cached 60s)
+  let channelList = getCached<string[]>("messages:channels");
+  if (!channelList) {
+    const list = await env.MESSAGES.list({ prefix: "msg:", limit: 1000 });
+    const channels = new Set<string>();
+    for (const key of list.keys) {
+      const raw = await env.MESSAGES.get(key.name);
+      if (!raw) continue;
+      const msg: MessageEnvelope = JSON.parse(raw);
+      if (msg.topic) channels.add(msg.topic);
+    }
+    channelList = [...channels];
+    setCache("messages:channels", channelList, 60_000);
   }
 
-  return Response.json([...channels]);
+  return Response.json(channelList);
 }

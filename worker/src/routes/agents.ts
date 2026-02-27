@@ -5,6 +5,7 @@ import {
   generateApiKey,
   hashApiKey,
 } from "../auth";
+import { getCached, setCache, invalidate } from "../cache";
 
 export async function handlePostAgent(
   request: Request,
@@ -70,6 +71,8 @@ export async function handlePostAgent(
 
   await env.AGENTS.put(`agent:${body.name}`, JSON.stringify(record));
   await env.AGENTS.put(`apikey:${apiKeyHash}`, body.name);
+  invalidate("agents:");
+  invalidate("health:");
 
   return Response.json({ name: body.name, apiKey }, { status: 201 });
 }
@@ -157,26 +160,31 @@ export async function handleGetAgents(
     );
   }
 
-  const list = await env.AGENTS.list({ prefix: "agent:" });
-  const agents: AgentPublic[] = [];
+  // Cache agent list for 30s (online status recalculated from cached records)
+  let agentRecords = getCached<AgentRecord[]>("agents:records");
+  if (!agentRecords) {
+    const list = await env.AGENTS.list({ prefix: "agent:" });
+    agentRecords = [];
+    for (const key of list.keys) {
+      const raw = await env.AGENTS.get(key.name);
+      if (!raw) continue;
+      agentRecords.push(JSON.parse(raw));
+    }
+    setCache("agents:records", agentRecords, 30_000);
+  }
 
-  for (const key of list.keys) {
-    const raw = await env.AGENTS.get(key.name);
-    if (!raw) continue;
-
-    const record: AgentRecord = JSON.parse(raw);
+  const agents: AgentPublic[] = agentRecords.map((record) => {
     const lastSeenTime = new Date(record.lastSeen).getTime();
     const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
-
-    agents.push({
+    return {
       name: record.name,
       capabilities: record.capabilities,
       publicKey: record.publicKey,
       signingKey: record.signingKey,
       online: lastSeenTime > fiveMinutesAgo,
       lastSeen: record.lastSeen,
-    });
-  }
+    };
+  });
 
   return Response.json(agents);
 }
