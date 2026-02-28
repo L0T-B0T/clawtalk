@@ -74,11 +74,15 @@ export async function handlePostMessage(
   // Resolve recipients (cache agent names for broadcast)
   let recipients: string[];
   if (body.to === "broadcast") {
-    let agentNames = getCached<string[]>("agents:names");
+    let agentNames = await getCached<string[]>("agents:names");
     if (!agentNames) {
-      const list = await env.AGENTS.list({ prefix: "agent:" });
-      agentNames = list.keys.map((k) => k.name.slice("agent:".length));
-      setCache("agents:names", agentNames, 60_000);
+      try {
+        const list = await env.AGENTS.list({ prefix: "agent:" });
+        agentNames = list.keys.map((k) => k.name.slice("agent:".length));
+        await setCache("agents:names", agentNames, 60_000);
+      } catch {
+        agentNames = []; // KV quota exceeded
+      }
     }
     recipients = agentNames.filter((n) => n !== senderName);
   } else if (Array.isArray(body.to)) {
@@ -118,11 +122,15 @@ export async function handlePostMessage(
     let recipientRecord = await env.AGENTS.get(`agent:${recipient}`);
     if (!recipientRecord) {
       // Try case-insensitive match (cached agent names)
-      let agentNames = getCached<string[]>("agents:names");
+      let agentNames = await getCached<string[]>("agents:names");
       if (!agentNames) {
-        const agentList = await env.AGENTS.list({ prefix: "agent:" });
-        agentNames = agentList.keys.map((k) => k.name.slice("agent:".length));
-        setCache("agents:names", agentNames, 60_000);
+        try {
+          const agentList = await env.AGENTS.list({ prefix: "agent:" });
+          agentNames = agentList.keys.map((k) => k.name.slice("agent:".length));
+          await setCache("agents:names", agentNames, 60_000);
+        } catch {
+          agentNames = [];
+        }
       }
       const match = agentNames.find(
         (n) => n.toLowerCase() === recipient.toLowerCase()
@@ -203,11 +211,15 @@ export async function handleGetMessages(
   // Admin sees all messages via global log; agents see their inbox
   const prefix = isAdmin ? "global:" : `msg:${agentName}:`;
   const cacheKey = `messages:keys:${prefix}`;
-  let allKeys = getCached<{ name: string }[]>(cacheKey);
+  let allKeys = await getCached<{ name: string }[]>(cacheKey);
   if (!allKeys) {
-    const list = await env.MESSAGES.list({ prefix, limit: 1000 });
-    allKeys = [...list.keys].reverse();
-    setCache(cacheKey, allKeys, 15_000); // 15s cache
+    try {
+      const list = await env.MESSAGES.list({ prefix, limit: 1000 });
+      allKeys = [...list.keys].reverse();
+      await setCache(cacheKey, allKeys, 15_000); // 15s cache
+    } catch {
+      allKeys = []; // KV quota exceeded
+    }
   }
 
   const messages: MessageEnvelope[] = [];
@@ -251,11 +263,15 @@ export async function handleDeleteMessage(
   // Find the message key belonging to this agent (cached key list)
   const prefix = `msg:${agentName}:`;
   const cacheKey = `messages:keys:${prefix}`;
-  let keyList = getCached<{ name: string }[]>(cacheKey);
+  let keyList = await getCached<{ name: string }[]>(cacheKey);
   if (!keyList) {
-    const list = await env.MESSAGES.list({ prefix, limit: 1000 });
-    keyList = [...list.keys];
-    setCache(cacheKey, keyList, 15_000);
+    try {
+      const list = await env.MESSAGES.list({ prefix, limit: 1000 });
+      keyList = [...list.keys];
+      await setCache(cacheKey, keyList, 15_000);
+    } catch {
+      keyList = [];
+    }
   }
 
   let found = false;
@@ -291,18 +307,22 @@ export async function handleGetChannels(
   }
 
   // Scan messages for unique topics/channels (cached 60s)
-  let channelList = getCached<string[]>("messages:channels");
+  let channelList = await getCached<string[]>("messages:channels");
   if (!channelList) {
-    const list = await env.MESSAGES.list({ prefix: "msg:", limit: 1000 });
-    const channels = new Set<string>();
-    for (const key of list.keys) {
-      const raw = await env.MESSAGES.get(key.name);
-      if (!raw) continue;
-      const msg: MessageEnvelope = JSON.parse(raw);
-      if (msg.topic) channels.add(msg.topic);
+    try {
+      const list = await env.MESSAGES.list({ prefix: "msg:", limit: 1000 });
+      const channels = new Set<string>();
+      for (const key of list.keys) {
+        const raw = await env.MESSAGES.get(key.name);
+        if (!raw) continue;
+        const msg: MessageEnvelope = JSON.parse(raw);
+        if (msg.topic) channels.add(msg.topic);
+      }
+      channelList = [...channels];
+      await setCache("messages:channels", channelList, 60_000);
+    } catch {
+      channelList = [];
     }
-    channelList = [...channels];
-    setCache("messages:channels", channelList, 60_000);
   }
 
   return Response.json(channelList);

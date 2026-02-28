@@ -48,16 +48,20 @@ export default {
     try {
       // Health check (cached 60s to save list() ops)
       if (path === "/health" && request.method === "GET") {
-        let agentCount = getCached<number>("health:agentCount");
+        let agentCount = await getCached<number>("health:agentCount");
         if (agentCount === null) {
-          const list = await env.AGENTS.list({ prefix: "agent:" });
-          agentCount = list.keys.length;
-          setCache("health:agentCount", agentCount, 60_000);
+          try {
+            const list = await env.AGENTS.list({ prefix: "agent:" });
+            agentCount = list.keys.length;
+            await setCache("health:agentCount", agentCount, 60_000);
+          } catch {
+            agentCount = -1; // KV quota exceeded
+          }
         }
         response = Response.json({
-          status: "ok",
+          status: agentCount >= 0 ? "ok" : "degraded",
           ts: new Date().toISOString(),
-          agents: agentCount,
+          agents: agentCount >= 0 ? agentCount : "unavailable (KV quota exceeded)",
         });
       }
       // Agents

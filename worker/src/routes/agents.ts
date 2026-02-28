@@ -161,16 +161,20 @@ export async function handleGetAgents(
   }
 
   // Cache agent list for 30s (online status recalculated from cached records)
-  let agentRecords = getCached<AgentRecord[]>("agents:records");
+  let agentRecords = await getCached<AgentRecord[]>("agents:records");
   if (!agentRecords) {
-    const list = await env.AGENTS.list({ prefix: "agent:" });
-    agentRecords = [];
-    for (const key of list.keys) {
-      const raw = await env.AGENTS.get(key.name);
-      if (!raw) continue;
-      agentRecords.push(JSON.parse(raw));
+    try {
+      const list = await env.AGENTS.list({ prefix: "agent:" });
+      agentRecords = [];
+      for (const key of list.keys) {
+        const raw = await env.AGENTS.get(key.name);
+        if (!raw) continue;
+        agentRecords.push(JSON.parse(raw));
+      }
+      await setCache("agents:records", agentRecords, 30_000);
+    } catch {
+      agentRecords = []; // KV quota exceeded — return empty
     }
-    setCache("agents:records", agentRecords, 30_000);
   }
 
   const agents: AgentPublic[] = agentRecords.map((record) => {

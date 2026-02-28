@@ -119,11 +119,15 @@ export async function handleGetAudit(
   const topicFilter = url.searchParams.get("topic");
 
   const cacheKey = "audit:keys";
-  let auditKeys = getCached<{ name: string }[]>(cacheKey);
+  let auditKeys = await getCached<{ name: string }[]>(cacheKey);
   if (!auditKeys) {
-    const list = await env.AUDIT.list({ prefix: "audit:", limit: 1000 });
-    auditKeys = [...list.keys];
-    setCache(cacheKey, auditKeys, 30_000); // 30s cache
+    try {
+      const list = await env.AUDIT.list({ prefix: "audit:", limit: 1000 });
+      auditKeys = [...list.keys];
+      await setCache(cacheKey, auditKeys, 30_000); // 30s cache
+    } catch {
+      auditKeys = []; // KV quota exceeded
+    }
   }
 
   const sinceTime = since ? new Date(since).getTime() : 0;
@@ -174,7 +178,15 @@ export async function handleDeleteAudit(
 
   const beforeTime = new Date(before).getTime();
   // Delete must use fresh list (not cached) to avoid missing entries
-  const list = await env.AUDIT.list({ prefix: "audit:", limit: 1000 });
+  let list;
+  try {
+    list = await env.AUDIT.list({ prefix: "audit:", limit: 1000 });
+  } catch {
+    return Response.json(
+      { error: "KV quota exceeded, try again tomorrow", code: "QUOTA_EXCEEDED" },
+      { status: 503 }
+    );
+  }
   invalidate("audit:");
 
   let deleted = 0;
