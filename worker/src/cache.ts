@@ -23,10 +23,15 @@ const KNOWN_CACHE_KEYS = [
   "agents:records",
   "agents:names",
   "messages:channels",
-  "messages:keys:global:",
-  "messages:keys:msg:Lotbot:",
-  "messages:keys:msg:Motya:",
+  "messages:keys:_index:messages:global",
+  "messages:keys:_index:messages:Lotbot",
+  "messages:keys:_index:messages:Motya",
   "audit:keys",
+  "idx:_index:agents",
+  "idx:_index:messages:global",
+  "idx:_index:messages:Lotbot",
+  "idx:_index:messages:Motya",
+  "idx:_index:audit",
 ];
 
 export async function getCached<T>(key: string): Promise<T | null> {

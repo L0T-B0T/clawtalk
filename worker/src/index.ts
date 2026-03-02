@@ -12,6 +12,7 @@ import {
   handleDeleteAudit,
 } from "./routes/audit";
 import { getCached, setCache } from "./cache";
+import { getIndex } from "./kv-index";
 
 function corsHeaders(): Record<string, string> {
   return {
@@ -51,17 +52,17 @@ export default {
         let agentCount = await getCached<number>("health:agentCount");
         if (agentCount === null) {
           try {
-            const list = await env.AGENTS.list({ prefix: "agent:" });
-            agentCount = list.keys.length;
+            const agentNames = await getIndex(env.AGENTS, "_index:agents");
+            agentCount = agentNames.length;
             await setCache("health:agentCount", agentCount, 60_000);
           } catch {
-            agentCount = -1; // KV quota exceeded
+            agentCount = -1; // KV error
           }
         }
         response = Response.json({
           status: agentCount >= 0 ? "ok" : "degraded",
           ts: new Date().toISOString(),
-          agents: agentCount >= 0 ? agentCount : "unavailable (KV quota exceeded)",
+          agents: agentCount >= 0 ? agentCount : "unavailable (KV error)",
         });
       }
       // Agents

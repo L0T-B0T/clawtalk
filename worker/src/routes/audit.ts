@@ -1,6 +1,7 @@
 import { Env, AuditEntry } from "../types";
 import { validateAgentKey, validateAdminKey } from "../auth";
 import { getCached, setCache, invalidate } from "../cache";
+import { getIndex, addToIndex, removeFromIndex } from "../kv-index";
 
 const MAX_PAYLOAD_SIZE = 64 * 1024; // 64KB
 const AUDIT_TTL = 2592000; // 30 days
@@ -92,6 +93,7 @@ export async function handlePostAudit(
   await env.AUDIT.put(key, JSON.stringify(entry), {
     expirationTtl: AUDIT_TTL,
   });
+  await addToIndex(env.AUDIT, "_index:audit", key);
   invalidate("audit:");
 
   return Response.json({ ok: true }, { status: 201 });
@@ -119,15 +121,14 @@ export async function handleGetAudit(
   const topicFilter = url.searchParams.get("topic");
 
   const cacheKey = "audit:keys";
-  let auditKeys = await getCached<{ name: string }[]>(cacheKey);
-  if (!auditKeys) {
-    try {
-      const list = await env.AUDIT.list({ prefix: "audit:", limit: 1000 });
-      auditKeys = [...list.keys];
-      await setCache(cacheKey, auditKeys, 30_000); // 30s cache
-    } catch {
-      auditKeys = []; // KV quota exceeded
-    }
+  let auditKeys: { name: string }[];
+  const cachedAuditKeys = await getCached<{ name: string }[]>(cacheKey);
+  if (cachedAuditKeys) {
+    auditKeys = cachedAuditKeys;
+  } else {
+    const keyNames = await getIndex(env.AUDIT, "_index:audit");
+    auditKeys = keyNames.map((name) => ({ name }));
+    await setCache(cacheKey, auditKeys, 30_000);
   }
 
   const sinceTime = since ? new Date(since).getTime() : 0;
@@ -177,26 +178,19 @@ export async function handleDeleteAudit(
   }
 
   const beforeTime = new Date(before).getTime();
-  // Delete must use fresh list (not cached) to avoid missing entries
-  let list;
-  try {
-    list = await env.AUDIT.list({ prefix: "audit:", limit: 1000 });
-  } catch {
-    return Response.json(
-      { error: "KV quota exceeded, try again tomorrow", code: "QUOTA_EXCEEDED" },
-      { status: 503 }
-    );
-  }
+  // Delete must use fresh index (not cached) to avoid missing entries
+  const auditKeyNames = await getIndex(env.AUDIT, "_index:audit", false);
   invalidate("audit:");
 
   let deleted = 0;
-  for (const key of list.keys) {
-    const raw = await env.AUDIT.get(key.name);
+  for (const keyName of auditKeyNames) {
+    const raw = await env.AUDIT.get(keyName);
     if (!raw) continue;
 
     const entry: AuditEntry = JSON.parse(raw);
     if (new Date(entry.ts).getTime() < beforeTime) {
-      await env.AUDIT.delete(key.name);
+      await env.AUDIT.delete(keyName);
+      await removeFromIndex(env.AUDIT, "_index:audit", keyName);
       deleted++;
     }
   }

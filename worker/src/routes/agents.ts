@@ -6,6 +6,7 @@ import {
   hashApiKey,
 } from "../auth";
 import { getCached, setCache, invalidate } from "../cache";
+import { getIndex, addToIndex } from "../kv-index";
 
 export async function handlePostAgent(
   request: Request,
@@ -71,6 +72,7 @@ export async function handlePostAgent(
 
   await env.AGENTS.put(`agent:${body.name}`, JSON.stringify(record));
   await env.AGENTS.put(`apikey:${apiKeyHash}`, body.name);
+  await addToIndex(env.AGENTS, "_index:agents", body.name);
   invalidate("agents:");
   invalidate("health:");
 
@@ -164,10 +166,10 @@ export async function handleGetAgents(
   let agentRecords = await getCached<AgentRecord[]>("agents:records");
   if (!agentRecords) {
     try {
-      const list = await env.AGENTS.list({ prefix: "agent:" });
+      const agentNames = await getIndex(env.AGENTS, "_index:agents");
       agentRecords = [];
-      for (const key of list.keys) {
-        const raw = await env.AGENTS.get(key.name);
+      for (const name of agentNames) {
+        const raw = await env.AGENTS.get(`agent:${name}`);
         if (!raw) continue;
         agentRecords.push(JSON.parse(raw));
       }

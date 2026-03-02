@@ -1,6 +1,7 @@
 import { Env, MessageEnvelope, SendMessageBody, AgentRecord } from "../types";
 import { validateAgentKey, validateAdminKey, checkRateLimit } from "../auth";
 import { getCached, setCache, invalidate } from "../cache";
+import { getIndex, addToIndex, removeFromIndex } from "../kv-index";
 
 const MAX_MESSAGE_SIZE = 64 * 1024; // 64KB
 const DEFAULT_TTL = 86400; // 1 day
@@ -76,13 +77,8 @@ export async function handlePostMessage(
   if (body.to === "broadcast") {
     let agentNames = await getCached<string[]>("agents:names");
     if (!agentNames) {
-      try {
-        const list = await env.AGENTS.list({ prefix: "agent:" });
-        agentNames = list.keys.map((k) => k.name.slice("agent:".length));
-        await setCache("agents:names", agentNames, 60_000);
-      } catch {
-        agentNames = []; // KV quota exceeded
-      }
+      agentNames = await getIndex(env.AGENTS, "_index:agents");
+      await setCache("agents:names", agentNames, 60_000);
     }
     recipients = agentNames.filter((n) => n !== senderName);
   } else if (Array.isArray(body.to)) {
@@ -124,13 +120,8 @@ export async function handlePostMessage(
       // Try case-insensitive match (cached agent names)
       let agentNames = await getCached<string[]>("agents:names");
       if (!agentNames) {
-        try {
-          const agentList = await env.AGENTS.list({ prefix: "agent:" });
-          agentNames = agentList.keys.map((k) => k.name.slice("agent:".length));
-          await setCache("agents:names", agentNames, 60_000);
-        } catch {
-          agentNames = [];
-        }
+        agentNames = await getIndex(env.AGENTS, "_index:agents");
+        await setCache("agents:names", agentNames, 60_000);
       }
       const match = agentNames.find(
         (n) => n.toLowerCase() === recipient.toLowerCase()
@@ -155,12 +146,14 @@ export async function handlePostMessage(
     await env.MESSAGES.put(key, JSON.stringify(msgEnvelope), {
       expirationTtl: ttl,
     });
+    await addToIndex(env.MESSAGES, `_index:messages:${recipient}`, key);
 
     // Also store in global log for admin monitoring
     const globalKey = `global:${sortableTs}:${msgId}:${recipient}`;
     await env.MESSAGES.put(globalKey, JSON.stringify(msgEnvelope), {
       expirationTtl: ttl,
     });
+    await addToIndex(env.MESSAGES, "_index:messages:global", globalKey);
 
     // Webhook delivery (fire-and-forget)
     const recipientRaw = await env.AGENTS.get(`agent:${recipient}`);
@@ -209,17 +202,16 @@ export async function handleGetMessages(
   const topic = url.searchParams.get("topic");
 
   // Admin sees all messages via global log; agents see their inbox
-  const prefix = isAdmin ? "global:" : `msg:${agentName}:`;
-  const cacheKey = `messages:keys:${prefix}`;
-  let allKeys = await getCached<{ name: string }[]>(cacheKey);
-  if (!allKeys) {
-    try {
-      const list = await env.MESSAGES.list({ prefix, limit: 1000 });
-      allKeys = [...list.keys].reverse();
-      await setCache(cacheKey, allKeys, 15_000); // 15s cache
-    } catch {
-      allKeys = []; // KV quota exceeded
-    }
+  const indexKey = isAdmin ? "_index:messages:global" : `_index:messages:${agentName}`;
+  const cacheKey = `messages:keys:${indexKey}`;
+  let allKeys: { name: string }[];
+  const cachedKeys = await getCached<{ name: string }[]>(cacheKey);
+  if (cachedKeys) {
+    allKeys = cachedKeys;
+  } else {
+    const keyNames = await getIndex(env.MESSAGES, indexKey);
+    allKeys = keyNames.reverse().map((name) => ({ name }));
+    await setCache(cacheKey, allKeys, 15_000);
   }
 
   const messages: MessageEnvelope[] = [];
@@ -260,24 +252,28 @@ export async function handleDeleteMessage(
     );
   }
 
-  // Find the message key belonging to this agent (cached key list)
-  const prefix = `msg:${agentName}:`;
-  const cacheKey = `messages:keys:${prefix}`;
-  let keyList = await getCached<{ name: string }[]>(cacheKey);
-  if (!keyList) {
-    try {
-      const list = await env.MESSAGES.list({ prefix, limit: 1000 });
-      keyList = [...list.keys];
-      await setCache(cacheKey, keyList, 15_000);
-    } catch {
-      keyList = [];
-    }
-  }
+  // Find the message key belonging to this agent (from index)
+  const indexKey = `_index:messages:${agentName}`;
+  const keyNames = await getIndex(env.MESSAGES, indexKey);
 
   let found = false;
-  for (const key of keyList) {
-    if (key.name.endsWith(`:${messageId}`)) {
-      await env.MESSAGES.delete(key.name);
+  for (const keyName of keyNames) {
+    if (keyName.endsWith(`:${messageId}`)) {
+      await env.MESSAGES.delete(keyName);
+      await removeFromIndex(env.MESSAGES, indexKey, keyName);
+      // Also remove from global index
+      // Global key format: global:{ts}:{msgId}:{recipient}
+      // Extract ts from msg key: msg:{agent}:{ts}:{msgId}
+      const parts = keyName.split(":");
+      const ts = parts[2];
+      // Try to remove matching global key (best effort — may have any recipient suffix)
+      const globalPrefix = `global:${ts}:${messageId}:`;
+      const globalKeys = await getIndex(env.MESSAGES, "_index:messages:global");
+      const globalMatch = globalKeys.find((k) => k.startsWith(globalPrefix));
+      if (globalMatch) {
+        await env.MESSAGES.delete(globalMatch);
+        await removeFromIndex(env.MESSAGES, "_index:messages:global", globalMatch);
+      }
       invalidate("messages:");
       found = true;
       break;
@@ -309,20 +305,17 @@ export async function handleGetChannels(
   // Scan messages for unique topics/channels (cached 60s)
   let channelList = await getCached<string[]>("messages:channels");
   if (!channelList) {
-    try {
-      const list = await env.MESSAGES.list({ prefix: "msg:", limit: 1000 });
-      const channels = new Set<string>();
-      for (const key of list.keys) {
-        const raw = await env.MESSAGES.get(key.name);
-        if (!raw) continue;
-        const msg: MessageEnvelope = JSON.parse(raw);
-        if (msg.topic) channels.add(msg.topic);
-      }
-      channelList = [...channels];
-      await setCache("messages:channels", channelList, 60_000);
-    } catch {
-      channelList = [];
+    const globalKeys = await getIndex(env.MESSAGES, "_index:messages:global");
+    const channels = new Set<string>();
+    // Read recent messages to extract topics
+    for (const keyName of globalKeys.slice(-200)) {
+      const raw = await env.MESSAGES.get(keyName);
+      if (!raw) continue;
+      const msg: MessageEnvelope = JSON.parse(raw);
+      if (msg.topic) channels.add(msg.topic);
     }
+    channelList = [...channels];
+    await setCache("messages:channels", channelList, 60_000);
   }
 
   return Response.json(channelList);
