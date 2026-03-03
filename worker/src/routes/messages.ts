@@ -4,8 +4,8 @@ import { getCached, setCache, invalidate } from "../cache";
 import { getIndex, addToIndex, removeFromIndex } from "../kv-index";
 
 const MAX_MESSAGE_SIZE = 64 * 1024; // 64KB
-const DEFAULT_TTL = 86400; // 1 day
-const MAX_TTL = 604800; // 7 days
+const DEFAULT_TTL = 2592000; // 30 days
+const MAX_TTL = 7776000; // 90 days
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
 
