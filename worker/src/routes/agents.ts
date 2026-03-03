@@ -179,18 +179,33 @@ export async function handleGetAgents(
     }
   }
 
-  const agents: AgentPublic[] = agentRecords.map((record) => {
-    const lastSeenTime = new Date(record.lastSeen).getTime();
-    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
-    return {
+  // Overlay cached lastSeen (from Cache API) on top of KV records.
+  // This ensures "online" status reflects real-time activity even when
+  // agent records are cached, without burning KV writes on every poll.
+  const agents: AgentPublic[] = [];
+  const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+
+  for (const record of agentRecords) {
+    const cachedLastSeen = await getCached<string>(`lastSeen:${record.name}`);
+    let effectiveLastSeen = record.lastSeen;
+
+    if (cachedLastSeen) {
+      const cachedTime = new Date(cachedLastSeen).getTime();
+      const kvTime = new Date(record.lastSeen).getTime();
+      if (cachedTime > kvTime) {
+        effectiveLastSeen = cachedLastSeen;
+      }
+    }
+
+    agents.push({
       name: record.name,
       capabilities: record.capabilities,
       publicKey: record.publicKey,
       signingKey: record.signingKey,
-      online: lastSeenTime > fiveMinutesAgo,
-      lastSeen: record.lastSeen,
-    };
-  });
+      online: new Date(effectiveLastSeen).getTime() > fiveMinutesAgo,
+      lastSeen: effectiveLastSeen,
+    });
+  }
 
   return Response.json(agents);
 }

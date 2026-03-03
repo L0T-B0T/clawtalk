@@ -11,6 +11,13 @@ import {
   handleGetAudit,
   handleDeleteAudit,
 } from "./routes/audit";
+import {
+  handlePostInvite,
+  handleGetInvites,
+  handleDeleteInvite,
+} from "./routes/invites";
+import { handleRegister } from "./routes/register";
+import { serveSignupPage } from "./signup-page";
 import { getCached, setCache } from "./cache";
 import { getIndex } from "./kv-index";
 
@@ -64,6 +71,26 @@ export default {
           ts: new Date().toISOString(),
           agents: agentCount >= 0 ? agentCount : "unavailable (KV error)",
         });
+      }
+      // Signup page
+      else if (path === "/signup" && request.method === "GET") {
+        response = serveSignupPage();
+      }
+      // Self-service registration
+      else if (path === "/register" && request.method === "POST") {
+        response = await handleRegister(request, env);
+      }
+      // Invites (admin)
+      else if (path === "/invites" && request.method === "POST") {
+        response = await handlePostInvite(request, env);
+      } else if (path === "/invites" && request.method === "GET") {
+        response = await handleGetInvites(request, env);
+      } else if (
+        path.startsWith("/invites/") &&
+        request.method === "DELETE"
+      ) {
+        const code = decodeURIComponent(path.slice("/invites/".length));
+        response = await handleDeleteInvite(request, env, code);
       }
       // Agents
       else if (path === "/agents" && request.method === "POST") {

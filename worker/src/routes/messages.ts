@@ -13,12 +13,16 @@ const MAX_TTL = 7776000; // 90 days
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
 
-async function updateLastSeen(agentName: string, env: Env): Promise<void> {
-  const raw = await env.AGENTS.get(`agent:${agentName}`);
-  if (!raw) return;
-  const record: AgentRecord = JSON.parse(raw);
-  record.lastSeen = new Date().toISOString();
-  await env.AGENTS.put(`agent:${agentName}`, JSON.stringify(record));
+/**
+ * Update last-seen via Cache API only — no KV write.
+ * This saves 1 KV write per poll/message, which is the biggest
+ * contributor to KV write quota exhaustion on the free tier.
+ * Cache TTL of 10 minutes means "online" status stays accurate;
+ * the KV agent record's lastSeen is only updated on registration
+ * or PATCH (infrequent, durable operations).
+ */
+async function updateLastSeen(agentName: string, _env: Env): Promise<void> {
+  await setCache(`lastSeen:${agentName}`, new Date().toISOString(), 600_000);
 }
 
 export async function handlePostMessage(

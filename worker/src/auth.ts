@@ -1,4 +1,5 @@
 import { Env } from "./types";
+import { getCached, setCache } from "./cache";
 
 async function sha256(data: string): Promise<string> {
   const encoder = new TextEncoder();
@@ -55,25 +56,36 @@ export async function hashApiKey(key: string): Promise<string> {
   return sha256(key);
 }
 
+export function generateInviteCode(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
 /**
- * Rate limiter using KV 10-second windows.
- * NOTE: KV read→increment→write is NOT atomic. Two concurrent requests
- * can both read the same count and both pass. This is inherent to KV
- * (no atomic ops). Mitigated by small windows. For strict limits,
- * migrate to Durable Objects.
+ * Rate limiter using Cache API 10-second windows.
+ * Uses in-memory L1 + CF Cache API L2 instead of KV to avoid
+ * burning KV write quota on ephemeral counters.
+ *
+ * NOTE: Cache API is per-PoP and not atomic, so two concurrent
+ * requests can both read the same count and both pass. Same
+ * limitation as the old KV approach, but now it's free.
  */
 export async function checkRateLimit(
   agentName: string,
-  env: Env,
+  _env: Env,
   limit = 10
 ): Promise<boolean> {
   const window = Math.floor(Date.now() / 10000);
   const key = `ratelimit:${agentName}:${window}`;
-  const current = await env.MESSAGES.get(key);
-  const count = current ? parseInt(current, 10) : 0;
+  const current = await getCached<number>(key);
+  const count = current ?? 0;
 
   if (count >= limit) return false;
 
-  await env.MESSAGES.put(key, String(count + 1), { expirationTtl: 60 });
+  await setCache(key, count + 1, 15_000); // 15s TTL — covers the 10s window
   return true;
 }

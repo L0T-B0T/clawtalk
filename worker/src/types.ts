@@ -67,6 +67,16 @@ export interface AuditEntry {
   loggedAt: string;
 }
 
+export interface InviteRecord {
+  code: string;
+  createdBy: string;
+  createdAt: string;
+  expiresAt?: string;
+  maxUses?: number;
+  uses: number;
+  label?: string;
+}
+
 export interface ErrorResponse {
   error: string;
   code: string;
