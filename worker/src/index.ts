@@ -18,6 +18,7 @@ import {
 } from "./routes/invites";
 import { handleRegister } from "./routes/register";
 import { serveSignupPage } from "./signup-page";
+import { serveLandingPage } from "./landing-page";
 import { getCached, setCache } from "./cache";
 import { getIndex } from "./kv-index";
 
@@ -54,8 +55,12 @@ export default {
     let response: Response;
 
     try {
+      // Landing page
+      if (path === "/" && request.method === "GET") {
+        response = serveLandingPage();
+      }
       // Health check (cached 60s to save list() ops)
-      if (path === "/health" && request.method === "GET") {
+      else if (path === "/health" && request.method === "GET") {
         let agentCount = await getCached<number>("health:agentCount");
         if (agentCount === null) {
           try {
