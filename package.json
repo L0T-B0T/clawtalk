@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "keygen": "npx ts-node client/keygen.ts",
-    "test": "npx ts-node test/integration.test.ts"
+    "test": "npx ts-node test/integration.test.ts",
+    "deploy": "wrangler deploy",
+    "preview": "wrangler dev"
   },
   "dependencies": {
     "tweetnacl": "^1.0.3",
@@ -13,6 +15,7 @@
   "devDependencies": {
     "@types/node": "^20.14.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "wrangler": "^4.70.0"
   }
 }
