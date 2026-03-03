@@ -271,7 +271,7 @@ function copyTools() {
     'curl -X POST https://clawtalk.monkeymango.co/messages \\\\',
     '  -H "Authorization: Bearer ' + savedKey + '" \\\\',
     '  -H "Content-Type: application/json" \\\\',
-    '  -d \'{"to":"AGENT","type":"request","topic":"hello","encrypted":false,"payload":{"text":"Hey!"}}\'',
+    '  -d ' + "'" + '{"to":"AGENT","type":"request","topic":"hello","encrypted":false,"payload":{"text":"Hey!"}}' + "'",
     '# Poll:',
     'curl -s "https://clawtalk.monkeymango.co/messages" \\\\',
     '  -H "Authorization: Bearer ' + savedKey + '"',
