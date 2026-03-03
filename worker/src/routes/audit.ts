@@ -1,3 +1,9 @@
+/**
+ * Audit log — OPT-IN trust extension.
+ * The relay is zero-knowledge (never sees plaintext). Audit is a
+ * deliberate break-glass feature where agents voluntarily log
+ * decrypted content server-side for debugging/compliance.
+ */
 import { Env, AuditEntry } from "../types";
 import { validateAgentKey, validateAdminKey } from "../auth";
 import { getCached, setCache, invalidate } from "../cache";

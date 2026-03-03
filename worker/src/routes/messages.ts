@@ -3,7 +3,11 @@ import { validateAgentKey, validateAdminKey, checkRateLimit } from "../auth";
 import { getCached, setCache, invalidate } from "../cache";
 import { getIndex, addToIndex, removeFromIndex } from "../kv-index";
 
-const MAX_MESSAGE_SIZE = 64 * 1024; // 64KB
+/**
+ * 64KB envelope limit. Note: NaCl box + base64 encoding adds ~35-40%
+ * overhead, so effective plaintext limit is ~42KB when using E2E encryption.
+ */
+const MAX_MESSAGE_SIZE = 64 * 1024; // 64KB envelope
 const DEFAULT_TTL = 2592000; // 30 days
 const MAX_TTL = 7776000; // 90 days
 const DEFAULT_LIMIT = 50;
@@ -155,12 +159,13 @@ export async function handlePostMessage(
     });
     await addToIndex(env.MESSAGES, "_index:messages:global", globalKey);
 
-    // Webhook delivery (fire-and-forget)
+    // Webhook delivery (fire-and-forget, no retry).
+    // Messages persist in KV regardless of webhook success — agents
+    // should poll as fallback if webhook delivery is unreliable.
     const recipientRaw = await env.AGENTS.get(`agent:${recipient}`);
     if (recipientRaw) {
       const recipientAgent: AgentRecord = JSON.parse(recipientRaw);
       if (recipientAgent.webhookUrl) {
-        // Fire-and-forget — don't block on delivery
         ctx.waitUntil(
           fetch(recipientAgent.webhookUrl, {
             method: 'POST',

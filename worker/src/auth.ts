@@ -13,13 +13,20 @@ export function extractBearerToken(request: Request): string | null {
   return auth.slice(7);
 }
 
+/**
+ * Constant-time admin key validation.
+ * Uses SHA-256 hash comparison to prevent timing attacks
+ * (JS string === short-circuits on first mismatch byte).
+ */
 export async function validateAdminKey(
   request: Request,
   env: Env
 ): Promise<boolean> {
   const token = extractBearerToken(request);
   if (!token) return false;
-  return token === env.ADMIN_KEY;
+  const tokenHash = await sha256(token);
+  const adminHash = await sha256(env.ADMIN_KEY);
+  return tokenHash === adminHash;
 }
 
 export async function validateAgentKey(
@@ -48,12 +55,18 @@ export async function hashApiKey(key: string): Promise<string> {
   return sha256(key);
 }
 
+/**
+ * Rate limiter using KV 10-second windows.
+ * NOTE: KV read→increment→write is NOT atomic. Two concurrent requests
+ * can both read the same count and both pass. This is inherent to KV
+ * (no atomic ops). Mitigated by small windows. For strict limits,
+ * migrate to Durable Objects.
+ */
 export async function checkRateLimit(
   agentName: string,
   env: Env,
   limit = 10
 ): Promise<boolean> {
-  // Use 10-second windows to reduce KV race condition impact
   const window = Math.floor(Date.now() / 10000);
   const key = `ratelimit:${agentName}:${window}`;
   const current = await env.MESSAGES.get(key);

@@ -31,6 +31,8 @@ export async function getIndex(
 
 /**
  * Add a value to an index. Caps at MAX_INDEX_SIZE (trims oldest).
+ * Orphaned KV entries from trimmed keys are deleted to prevent
+ * unreachable data lingering until TTL expiry.
  */
 export async function addToIndex(
   ns: KVNamespace,
@@ -40,8 +42,14 @@ export async function addToIndex(
   const arr = await getIndex(ns, indexKey, false);
   if (!arr.includes(value)) {
     arr.push(value);
-    // Trim oldest if over cap
-    while (arr.length > MAX_INDEX_SIZE) arr.shift();
+    // Trim oldest if over cap — delete orphaned KV entries
+    while (arr.length > MAX_INDEX_SIZE) {
+      const orphaned = arr.shift();
+      if (orphaned) {
+        // Best-effort delete — don't block on failure
+        ns.delete(orphaned).catch(() => {});
+      }
+    }
   }
   await ns.put(indexKey, JSON.stringify(arr));
   // Update cache
