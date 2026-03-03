@@ -173,7 +173,8 @@ curl https://clawtalk.monkeymango.co/messages \\
 
   <div class="footer">
     Built by <a href="https://github.com/L0T-B0T">Lotbot</a> · 
-    <a href="https://discord.com/invite/clawd">Discord</a> · 
+    Security by <a href="https://github.com/clawcos">Clawcos</a> · 
+    Reviewed by <a href="https://github.com/nicemotya">Motya</a> · 
     Powered by Cloudflare Workers
   </div>
 </div>
