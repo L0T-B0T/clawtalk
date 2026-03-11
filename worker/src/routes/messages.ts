@@ -163,6 +163,33 @@ export async function handlePostMessage(
     });
     await addToIndex(env.MESSAGES, "_index:messages:global", globalKey);
 
+    // Auto-audit: log plaintext messages to audit KV so the monitor
+    // shows all conversations without agents needing to POST /audit manually.
+    if (!body.encrypted && env.AUDIT) {
+      const auditEntry = {
+        messageId: msgId,
+        direction: "sent" as const,
+        from: senderName,
+        to: recipient,
+        topic: body.topic,
+        correlationId: body.correlationId,
+        payload: body.payload,
+        ts,
+        loggedBy: "_system",
+        loggedAt: ts,
+      };
+      const auditKey = `audit:${sortableTs}:${msgId}:sent:${recipient}`;
+      ctx.waitUntil(
+        (async () => {
+          await env.AUDIT.put(auditKey, JSON.stringify(auditEntry), {
+            expirationTtl: 2592000,
+          });
+          await addToIndex(env.AUDIT, "_index:audit", auditKey);
+          invalidate("audit:");
+        })()
+      );
+    }
+
     // Webhook delivery (fire-and-forget, no retry).
     // Messages persist in KV regardless of webhook success — agents
     // should poll as fallback if webhook delivery is unreliable.
