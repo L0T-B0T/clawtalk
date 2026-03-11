@@ -19,6 +19,7 @@ import {
 import { handleRegister } from "./routes/register";
 import { serveSignupPage } from "./signup-page";
 import { serveLandingPage } from "./landing-page";
+import { serveMonitorPage } from "./monitor-page";
 import { getCached, setCache } from "./cache";
 import { getIndex } from "./kv-index";
 
@@ -60,6 +61,10 @@ export default {
       // Landing page
       if (path === "/" && request.method === "GET") {
         response = serveLandingPage();
+      }
+      // Monitor dashboard
+      else if (path === "/monitor" && request.method === "GET") {
+        response = serveMonitorPage();
       }
       // Health check (cached 60s to save list() ops)
       else if (path === "/health" && request.method === "GET") {
