@@ -126,16 +126,8 @@ export async function handleGetAudit(
   const toFilter = url.searchParams.get("to");
   const topicFilter = url.searchParams.get("topic");
 
-  const cacheKey = "audit:keys";
-  let auditKeys: { name: string }[];
-  const cachedAuditKeys = await getCached<{ name: string }[]>(cacheKey);
-  if (cachedAuditKeys) {
-    auditKeys = cachedAuditKeys;
-  } else {
-    const keyNames = await getIndex(env.AUDIT, "_index:audit");
-    auditKeys = keyNames.map((name) => ({ name }));
-    await setCache(cacheKey, auditKeys, 30_000);
-  }
+  const keyNames = await getIndex(env.AUDIT, "_index:audit");
+  const auditKeys = keyNames.map((name: string) => ({ name }));
 
   const sinceTime = since ? new Date(since).getTime() : 0;
   const entries: AuditEntry[] = [];

@@ -80,15 +80,11 @@ export async function handlePostMessage(
     );
   }
 
-  // Resolve recipients (cache agent names for broadcast)
+  // Resolve recipients
   let recipients: string[];
   if (body.to === "broadcast") {
-    let agentNames = await getCached<string[]>("agents:names");
-    if (!agentNames) {
-      agentNames = await getIndex(env.AGENTS, "_index:agents");
-      await setCache("agents:names", agentNames, 60_000);
-    }
-    recipients = agentNames.filter((n) => n !== senderName);
+    const agentNames = await getIndex(env.AGENTS, "_index:agents");
+    recipients = agentNames.filter((n: string) => n !== senderName);
   } else if (Array.isArray(body.to)) {
     recipients = body.to;
   } else {
@@ -126,11 +122,7 @@ export async function handlePostMessage(
     let recipientRecord = await env.AGENTS.get(`agent:${recipient}`);
     if (!recipientRecord) {
       // Try case-insensitive match (cached agent names)
-      let agentNames = await getCached<string[]>("agents:names");
-      if (!agentNames) {
-        agentNames = await getIndex(env.AGENTS, "_index:agents");
-        await setCache("agents:names", agentNames, 60_000);
-      }
+      const agentNames = await getIndex(env.AGENTS, "_index:agents");
       const match = agentNames.find(
         (n) => n.toLowerCase() === recipient.toLowerCase()
       );
@@ -239,16 +231,8 @@ export async function handleGetMessages(
 
   // Admin sees all messages via global log; agents see their inbox
   const indexKey = isAdmin ? "_index:messages:global" : `_index:messages:${agentName}`;
-  const cacheKey = `messages:keys:${indexKey}`;
-  let allKeys: { name: string }[];
-  const cachedKeys = await getCached<{ name: string }[]>(cacheKey);
-  if (cachedKeys) {
-    allKeys = cachedKeys;
-  } else {
-    const keyNames = await getIndex(env.MESSAGES, indexKey);
-    allKeys = keyNames.reverse().map((name) => ({ name }));
-    await setCache(cacheKey, allKeys, 5_000);
-  }
+  const keyNames = await getIndex(env.MESSAGES, indexKey);
+  const allKeys = keyNames.reverse().map((name: string) => ({ name }));
 
   const messages: MessageEnvelope[] = [];
   const sinceTime = since ? new Date(since).getTime() : 0;
@@ -338,21 +322,16 @@ export async function handleGetChannels(
     );
   }
 
-  // Scan messages for unique topics/channels (cached 60s)
-  let channelList = await getCached<string[]>("messages:channels");
-  if (!channelList) {
-    const globalKeys = await getIndex(env.MESSAGES, "_index:messages:global");
-    const channels = new Set<string>();
-    // Read recent messages to extract topics
-    for (const keyName of globalKeys.slice(-200)) {
-      const raw = await env.MESSAGES.get(keyName);
-      if (!raw) continue;
-      const msg: MessageEnvelope = JSON.parse(raw);
-      if (msg.topic) channels.add(msg.topic);
-    }
-    channelList = [...channels];
-    await setCache("messages:channels", channelList, 60_000);
+  // Scan messages for unique topics/channels
+  const globalKeys = await getIndex(env.MESSAGES, "_index:messages:global");
+  const channels = new Set<string>();
+  for (const keyName of globalKeys.slice(-200)) {
+    const raw = await env.MESSAGES.get(keyName);
+    if (!raw) continue;
+    const msg: MessageEnvelope = JSON.parse(raw);
+    if (msg.topic) channels.add(msg.topic);
   }
+  const channelList = [...channels];
 
   return Response.json(channelList);
 }
