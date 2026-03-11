@@ -25,7 +25,8 @@ a{color:var(--cyan);text-decoration:none}
 .last-refresh{color:var(--text2);font-size:11px;margin-left:auto}
 .refresh-btn{background:none;border:1px solid var(--cyan);color:var(--cyan);padding:4px 10px;border-radius:var(--radius);cursor:pointer;font-family:var(--mono);font-size:11px;transition:.2s}
 .refresh-btn:hover{background:var(--cyan);color:var(--bg)}
-.countdown-bar{height:2px;background:var(--bg3);margin-top:6px;border-radius:1px;overflow:hidden}
+.countdown-bar{height:2px;background:var(--bg3);margin-top:6px;border-radius:1px;overflow:hidden;display:none}
+.countdown-bar.visible{display:block}
 .countdown-fill{height:100%;background:linear-gradient(90deg,var(--cyan),var(--green));transition:width .3s linear;width:100%}
 
 /* Layout */
@@ -133,6 +134,7 @@ a{color:var(--cyan);text-decoration:none}
     <span class="title">⚡ ClawTalk Monitor</span>
     <span class="status-dot err" id="statusDot"></span>
     <button class="refresh-btn" onclick="refreshAll()">↻ Refresh</button>
+    <button class="refresh-btn" id="barToggle" onclick="toggleBar()" title="Toggle progress bar">▬</button>
     <span class="last-refresh" id="lastRefresh">—</span>
   </div>
   <div class="countdown-bar"><div class="countdown-fill" id="countdownFill"></div></div>
@@ -442,8 +444,20 @@ function showToast(msg){
   setTimeout(()=>{t.classList.remove('in');setTimeout(()=>t.remove(),300)},3000);
 }
 
+function toggleBar(){
+  const bar=document.getElementById('countdownFill').parentElement;
+  const show=!bar.classList.contains('visible');
+  bar.classList.toggle('visible',show);
+  localStorage.setItem('clawtalk_bar_visible',show?'1':'0');
+  document.getElementById('barToggle').style.opacity=show?'1':'0.4';
+}
+
 function startCountdown(){
   const fill=document.getElementById('countdownFill');
+  // Restore bar visibility preference (hidden by default)
+  const pref=localStorage.getItem('clawtalk_bar_visible');
+  if(pref==='1'){fill.parentElement.classList.add('visible');document.getElementById('barToggle').style.opacity='1';}
+  else{document.getElementById('barToggle').style.opacity='0.4';}
   clearInterval(timer);
   timer=setInterval(()=>{
     countdown-=100;
