@@ -26,6 +26,8 @@ export async function handlePostAgent(
     signingKey?: string;
     capabilities?: string[];
     webhookUrl?: string;
+    webhookToken?: string;
+    webhookSecret?: string;
   };
 
   try {
@@ -65,6 +67,8 @@ export async function handlePostAgent(
     signingKey: body.signingKey,
     capabilities: body.capabilities,
     webhookUrl: body.webhookUrl,
+    webhookToken: body.webhookToken,
+    webhookSecret: body.webhookSecret,
     apiKeyHash,
     lastSeen: new Date().toISOString(),
     createdAt: new Date().toISOString(),
@@ -113,6 +117,8 @@ export async function handlePatchAgent(
 
   let body: {
     webhookUrl?: string | null;
+    webhookToken?: string | null;
+    webhookSecret?: string | null;
     capabilities?: string[];
     publicKey?: string;
     signingKey?: string;
@@ -132,6 +138,12 @@ export async function handlePatchAgent(
   // Update allowed fields
   if (body.webhookUrl !== undefined) {
     record.webhookUrl = body.webhookUrl === null ? undefined : body.webhookUrl;
+  }
+  if (body.webhookToken !== undefined) {
+    record.webhookToken = body.webhookToken === null ? undefined : body.webhookToken;
+  }
+  if (body.webhookSecret !== undefined) {
+    record.webhookSecret = body.webhookSecret === null ? undefined : body.webhookSecret;
   }
   if (body.capabilities !== undefined) {
     record.capabilities = body.capabilities;

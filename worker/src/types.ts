@@ -12,6 +12,8 @@ export interface AgentRecord {
   signingKey: string;
   capabilities?: string[];
   webhookUrl?: string;
+  webhookToken?: string;
+  webhookSecret?: string;
   apiKeyHash: string;
   lastSeen: string;
   createdAt: string;
