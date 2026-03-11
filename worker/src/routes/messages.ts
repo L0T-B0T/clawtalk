@@ -247,7 +247,7 @@ export async function handleGetMessages(
   } else {
     const keyNames = await getIndex(env.MESSAGES, indexKey);
     allKeys = keyNames.reverse().map((name) => ({ name }));
-    await setCache(cacheKey, allKeys, 15_000);
+    await setCache(cacheKey, allKeys, 5_000);
   }
 
   const messages: MessageEnvelope[] = [];
