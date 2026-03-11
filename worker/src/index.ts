@@ -35,6 +35,8 @@ function addCors(response: Response): Response {
   for (const [key, value] of Object.entries(corsHeaders())) {
     headers.set(key, value);
   }
+  headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  headers.set("Pragma", "no-cache");
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
