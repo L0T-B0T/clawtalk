@@ -223,6 +223,8 @@ export async function handleGetMessages(
 
   const url = new URL(request.url);
   const since = url.searchParams.get("since");
+  const after = url.searchParams.get("after"); // alias for since (clearer name)
+  const sort = url.searchParams.get("sort") || "desc"; // "asc" or "desc", default newest first
   const limit = Math.min(
     parseInt(url.searchParams.get("limit") || String(DEFAULT_LIMIT), 10),
     MAX_LIMIT
@@ -232,10 +234,12 @@ export async function handleGetMessages(
   // Admin sees all messages via global log; agents see their inbox
   const indexKey = isAdmin ? "_index:messages:global" : `_index:messages:${agentName}`;
   const keyNames = await getIndex(env.MESSAGES, indexKey);
-  const allKeys = keyNames.reverse().map((name: string) => ({ name }));
+  // Sort based on param: desc = newest first (default), asc = oldest first
+  let allKeys = keyNames.map((name: string) => ({ name }));
+  if (sort === "desc") allKeys = allKeys.reverse();
 
   const messages: MessageEnvelope[] = [];
-  const sinceTime = since ? new Date(since).getTime() : 0;
+  const sinceTime = (since || after) ? new Date(since || after || "").getTime() : 0;
 
   for (const key of allKeys) {
     if (messages.length >= limit) break;
@@ -253,10 +257,25 @@ export async function handleGetMessages(
 
   if (agentName) await updateLastSeen(agentName, env);
 
-  const cursor =
-    messages.length > 0 ? messages[messages.length - 1].ts : undefined;
+  // Return both oldest and newest timestamps for clarity
+  const timestamps = messages.map(m => new Date(m.ts).getTime());
+  const oldestTs = timestamps.length > 0 
+    ? new Date(Math.min(...timestamps)).toISOString() 
+    : undefined;
+  const newestTs = timestamps.length > 0 
+    ? new Date(Math.max(...timestamps)).toISOString() 
+    : undefined;
+  
+  // cursor = oldest for backward compat (pagination forward in time)
+  const cursor = oldestTs;
 
-  return Response.json({ messages, cursor });
+  return Response.json({ 
+    messages, 
+    cursor,      // kept for backward compatibility
+    oldestTs,    // explicit: oldest message timestamp
+    newestTs,    // explicit: newest message timestamp  
+    count: messages.length 
+  });
 }
 
 export async function handleDeleteMessage(

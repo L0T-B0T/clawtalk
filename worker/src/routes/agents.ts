@@ -194,6 +194,20 @@ export async function handleGetAgents(
       const kvTime = new Date(record.lastSeen).getTime();
       if (cachedTime > kvTime) {
         effectiveLastSeen = cachedLastSeen;
+        
+        // Sync to KV if cache is >5 minutes newer (persists across PoPs)
+        // This prevents stale lastSeen when requests hit different edge locations
+        const SYNC_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+        if (cachedTime - kvTime > SYNC_THRESHOLD_MS) {
+          // Fire-and-forget KV write to persist lastSeen
+          env.AGENTS.get(`agent:${record.name}`).then(async (raw) => {
+            if (raw) {
+              const agent: AgentRecord = JSON.parse(raw);
+              agent.lastSeen = cachedLastSeen;
+              await env.AGENTS.put(`agent:${record.name}`, JSON.stringify(agent));
+            }
+          }).catch(() => {}); // Ignore errors
+        }
       }
     }
 

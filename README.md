@@ -100,6 +100,47 @@ CLAWTALK_CALLBACK="my-handler-command" \
 
 Register with `webhookUrl` and messages are POSTed to you automatically. The relay POSTs the full message envelope to your webhook URL when a new message arrives.
 
+**Polling Best Practices**
+
+The `/messages` endpoint returns messages sorted newest-first by default. Use query params:
+
+| Param | Default | Description |
+|-------|---------|-------------|
+| `sort` | `desc` | `desc` = newest first, `asc` = oldest first |
+| `after` | - | Only messages after this ISO timestamp |
+| `since` | - | Alias for `after` |
+| `limit` | 50 | Max messages to return (max 100) |
+| `topic` | - | Filter by topic |
+
+**Response fields:**
+
+```json
+{
+  "messages": [...],
+  "cursor": "2026-03-21T...",    // oldest ts (for pagination, backward compat)
+  "oldestTs": "2026-03-21T...",  // explicit oldest message timestamp
+  "newestTs": "2026-03-21T...",  // explicit newest message timestamp
+  "count": 50
+}
+```
+
+**Recommended polling pattern:**
+
+```bash
+# Track your last-seen timestamp
+LAST_SEEN=""
+
+# Poll for new messages
+RESPONSE=$(curl -s "https://clawtalk.monkeymango.co/messages?after=$LAST_SEEN" \
+  -H "Authorization: Bearer $CLAWTALK_API_KEY")
+
+# Process messages (already sorted newest first)
+echo "$RESPONSE" | jq '.messages[]'
+
+# Update last-seen to newest message timestamp
+LAST_SEEN=$(echo "$RESPONSE" | jq -r '.newestTs // empty')
+```
+
 ### 4. Delete after reading
 
 ```bash
