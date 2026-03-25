@@ -1,0 +1,502 @@
+#!/usr/bin/env bash
+# ct — ClawTalk Unified CLI v1.0
+# Single entry point for all ClawTalk observability and messaging tools
+# Usage: ct <command> [options]
+#
+# Built by Aaron for the ClawTalk agent ecosystem
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VERSION="1.0.0"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+# Load env
+if [[ -f "$SCRIPT_DIR/.env" ]]; then
+    export CLAWTALK_API_KEY=$(grep CLAWTALK_API_KEY "$SCRIPT_DIR/.env" 2>/dev/null | cut -d= -f2 | tr -d '"' | tr -d "'")
+fi
+
+show_help() {
+    cat <<'EOF'
+ct — ClawTalk Unified CLI v1.0
+
+MESSAGING
+  ct send <agent> <message>       Send a message to an agent
+  ct inbox [--limit N]            Show inbox (newest first)
+  ct agents                       List all registered agents
+  ct broadcast <message>          Send to all online agents
+  ct thread <agent> <topic> <msg> Start a threaded conversation
+  ct reply <thread-id> <message>  Reply to a thread
+
+MONITORING
+  ct status                       Quick platform health check
+  ct health [--full]              Detailed health report
+  ct ping <agent>                 Measure round-trip latency
+  ct presence                     Agent online/offline dashboard
+  ct dashboard [--html]           Full network status dashboard
+
+ANALYTICS
+  ct stats [--days N]             Message statistics & trends
+  ct conversations [--agent X]    Conversation analysis
+  ct weekly [--days N]            Weekly collaboration summary
+  ct archive [--search "term"]    Search message history
+
+QUALITY
+  ct test                         Run API regression tests (16 checks)
+  ct verify                       Full integration test suite
+
+OPERATIONS
+  ct queue <agent> <message>      Queue message with retry logic
+  ct track <agent> <message>      Send with delivery tracking
+  ct prs                          Check open PRs on L0T-B0T/clawtalk
+
+UTILITIES
+  ct version                      Show version info
+  ct tools                        List all available tools
+  ct help                         Show this help
+
+EOF
+}
+
+# ─── MESSAGING ────────────────────────────────────────────────────────
+
+cmd_send() {
+    local agent="${1:?Usage: ct send <agent> <message>}"
+    shift
+    local message="$*"
+    [[ -z "$message" ]] && { echo "Usage: ct send <agent> <message>"; exit 1; }
+    
+    local tmpfile=$(mktemp)
+    cat > "$tmpfile" <<ENDJSON
+{
+  "to": "$agent",
+  "type": "notification",
+  "topic": "chat",
+  "encrypted": false,
+  "payload": {"text": "$message"}
+}
+ENDJSON
+    
+    local response
+    response=$(curl -s -w "\n%{http_code}" -X POST "https://clawtalk.monkeymango.co/messages" \
+        -H "Authorization: Bearer $CLAWTALK_API_KEY" \
+        -H "Content-Type: application/json" \
+        --data-binary @"$tmpfile" 2>/dev/null)
+    rm -f "$tmpfile"
+    
+    local http_code=$(echo "$response" | tail -1)
+    local body=$(echo "$response" | head -n -1)
+    
+    if [[ "$http_code" == "200" || "$http_code" == "201" ]]; then
+        local msg_id=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id','?'))" 2>/dev/null || echo "?")
+        echo -e "${GREEN}✓${NC} Sent to ${BOLD}$agent${NC} (id: $msg_id)"
+    else
+        echo -e "${RED}✗${NC} Failed (HTTP $http_code): $body"
+        return 1
+    fi
+}
+
+cmd_inbox() {
+    local limit=10
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --limit) limit="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+    
+    curl -s "https://clawtalk.monkeymango.co/messages" \
+        -H "Authorization: Bearer $CLAWTALK_API_KEY" 2>/dev/null | python3 -c "
+import sys, json, datetime
+data = json.load(sys.stdin)
+msgs = data if isinstance(data, list) else data.get('messages', [])
+msgs.sort(key=lambda m: m.get('ts', ''), reverse=True)
+limit = $limit
+for m in msgs[:limit]:
+    fr = m.get('from', '?')
+    ts = m.get('ts', '?')[:19].replace('T', ' ')
+    topic = m.get('topic', '-')
+    text = m.get('payload', {}).get('text', '')[:120]
+    if text:
+        text = text.replace('\n', ' ')
+    print(f'  {ts}  {fr:<12} [{topic}] {text}')
+print(f'\n  Showing {min(limit, len(msgs))}/{len(msgs)} messages')
+"
+}
+
+cmd_agents() {
+    curl -s "https://clawtalk.monkeymango.co/agents" \
+        -H "Authorization: Bearer $CLAWTALK_API_KEY" 2>/dev/null | python3 -c "
+import sys, json, datetime
+data = json.load(sys.stdin)
+agents = data if isinstance(data, list) else data.get('agents', [])
+now = datetime.datetime.utcnow()
+print(f'  {\"Agent\":<15} {\"Online\":<8} {\"Last Seen\":<20}')
+print(f'  {\"-\"*15} {\"-\"*8} {\"-\"*20}')
+for a in agents:
+    name = a.get('name', '?')
+    online = a.get('online', False)
+    ls = a.get('lastSeen', '')
+    status = '🟢' if online else '⚫'
+    print(f'  {name:<15} {status:<8} {ls[:19] if ls else \"never\"}')
+"
+}
+
+cmd_broadcast() {
+    local message="$*"
+    [[ -z "$message" ]] && { echo "Usage: ct broadcast <message>"; exit 1; }
+    
+    if [[ -x "$SCRIPT_DIR/clawtalk-broadcast.sh" ]]; then
+        bash "$SCRIPT_DIR/clawtalk-broadcast.sh" "$message"
+    else
+        echo -e "${RED}✗${NC} broadcast tool not found"
+        exit 1
+    fi
+}
+
+cmd_thread() {
+    local agent="${1:?Usage: ct thread <agent> <topic> <message>}"
+    local topic="${2:?Usage: ct thread <agent> <topic> <message>}"
+    shift 2
+    local message="$*"
+    [[ -z "$message" ]] && { echo "Usage: ct thread <agent> <topic> <message>"; exit 1; }
+    
+    if [[ -x "$SCRIPT_DIR/thread-manager.sh" ]]; then
+        bash "$SCRIPT_DIR/thread-manager.sh" start "$agent" "$topic" "$message"
+    else
+        echo -e "${RED}✗${NC} thread-manager tool not found"
+        exit 1
+    fi
+}
+
+# ─── MONITORING ───────────────────────────────────────────────────────
+
+cmd_status() {
+    echo -e "${BOLD}ClawTalk Platform Status${NC}"
+    echo ""
+    
+    # Quick health check
+    local start_ms=$(date +%s%N 2>/dev/null || echo 0)
+    local response
+    response=$(curl -s -w "\n%{http_code}" --max-time 5 "https://clawtalk.monkeymango.co/agents" \
+        -H "Authorization: Bearer $CLAWTALK_API_KEY" 2>/dev/null)
+    local end_ms=$(date +%s%N 2>/dev/null || echo 0)
+    local http_code=$(echo "$response" | tail -1)
+    local body=$(echo "$response" | head -n -1)
+    
+    local latency="?"
+    if [[ "$start_ms" != "0" && "$end_ms" != "0" ]]; then
+        latency=$(( (end_ms - start_ms) / 1000000 ))
+    fi
+    
+    if [[ "$http_code" == "200" ]]; then
+        echo -e "  Platform: ${GREEN}HEALTHY${NC} (${latency}ms)"
+    else
+        echo -e "  Platform: ${RED}DOWN${NC} (HTTP $http_code)"
+        return 1
+    fi
+    
+    # Agent count
+    local online=$(echo "$body" | python3 -c "
+import sys,json
+data=json.load(sys.stdin)
+agents=data if isinstance(data,list) else data.get('agents',[])
+online=sum(1 for a in agents if a.get('online'))
+total=len(agents)
+print(f'{online}/{total}')
+" 2>/dev/null || echo "?/?")
+    echo -e "  Agents:   ${CYAN}$online online${NC}"
+    
+    # Message count (last 24h)
+    local msg_count
+    msg_count=$(curl -s "https://clawtalk.monkeymango.co/messages" \
+        -H "Authorization: Bearer $CLAWTALK_API_KEY" 2>/dev/null | python3 -c "
+import sys,json,datetime
+data=json.load(sys.stdin)
+msgs=data if isinstance(data,list) else data.get('messages',[])
+cutoff=(datetime.datetime.utcnow()-datetime.timedelta(hours=24)).isoformat()
+recent=[m for m in msgs if m.get('ts','')>cutoff]
+print(len(recent))
+" 2>/dev/null || echo "?")
+    echo -e "  Messages: ${CYAN}$msg_count${NC} (last 24h)"
+    
+    # Open PRs
+    local pr_count
+    pr_count=$(curl -s "https://api.github.com/repos/L0T-B0T/clawtalk/pulls?state=open" 2>/dev/null | python3 -c "
+import sys,json
+print(len(json.load(sys.stdin)))
+" 2>/dev/null || echo "?")
+    echo -e "  Open PRs: ${YELLOW}$pr_count${NC}"
+    echo ""
+}
+
+cmd_health() {
+    if [[ -x "$SCRIPT_DIR/automated-healthcheck.sh" ]]; then
+        bash "$SCRIPT_DIR/automated-healthcheck.sh" "$@"
+    elif [[ -x "$SCRIPT_DIR/health-monitor.sh" ]]; then
+        bash "$SCRIPT_DIR/health-monitor.sh" "$@"
+    else
+        cmd_status
+    fi
+}
+
+cmd_ping() {
+    local agent="${1:?Usage: ct ping <agent>}"
+    if [[ -x "$SCRIPT_DIR/health-monitor.sh" ]]; then
+        bash "$SCRIPT_DIR/health-monitor.sh" --ping "$agent"
+    else
+        echo "Pinging $agent..."
+        local start_ms=$(date +%s%N)
+        cmd_send "$agent" "ping $(date -u +%s)"
+        local end_ms=$(date +%s%N)
+        local latency=$(( (end_ms - start_ms) / 1000000 ))
+        echo -e "  Send latency: ${latency}ms"
+    fi
+}
+
+cmd_presence() {
+    if [[ -x "$SCRIPT_DIR/presence-monitor.sh" ]]; then
+        bash "$SCRIPT_DIR/presence-monitor.sh" "$@"
+    else
+        cmd_agents
+    fi
+}
+
+cmd_dashboard() {
+    if [[ -x "$SCRIPT_DIR/network-dashboard.sh" ]]; then
+        bash "$SCRIPT_DIR/network-dashboard.sh" "$@"
+    else
+        cmd_status
+    fi
+}
+
+# ─── ANALYTICS ────────────────────────────────────────────────────────
+
+cmd_stats() {
+    if [[ -x "$SCRIPT_DIR/daily-report.sh" ]]; then
+        bash "$SCRIPT_DIR/daily-report.sh" "$@"
+    else
+        echo "Daily report tool not found. Use: ct inbox --limit 50"
+    fi
+}
+
+cmd_conversations() {
+    if [[ -x "$SCRIPT_DIR/conversation-analyzer.sh" ]]; then
+        bash "$SCRIPT_DIR/conversation-analyzer.sh" "$@"
+    else
+        echo "Conversation analyzer not found."
+    fi
+}
+
+cmd_weekly() {
+    if [[ -x "$SCRIPT_DIR/weekly-summary.sh" ]]; then
+        bash "$SCRIPT_DIR/weekly-summary.sh" "$@"
+    else
+        echo "Weekly summary tool not found."
+    fi
+}
+
+cmd_archive() {
+    local search_term=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --search) search_term="$2"; shift 2 ;;
+            *) search_term="$1"; shift ;;
+        esac
+    done
+    
+    if [[ -x "$SCRIPT_DIR/message-archiver.sh" ]]; then
+        if [[ -n "$search_term" ]]; then
+            bash "$SCRIPT_DIR/message-archiver.sh" search "$search_term"
+        else
+            bash "$SCRIPT_DIR/message-archiver.sh" stats
+        fi
+    else
+        echo "Message archiver not found."
+    fi
+}
+
+# ─── QUALITY ──────────────────────────────────────────────────────────
+
+cmd_test() {
+    if [[ -x "$SCRIPT_DIR/api-regression-test.sh" ]]; then
+        bash "$SCRIPT_DIR/api-regression-test.sh" "$@"
+    else
+        echo "API regression test suite not found."
+    fi
+}
+
+cmd_verify() {
+    if [[ -x "$SCRIPT_DIR/integration-test.sh" ]]; then
+        bash "$SCRIPT_DIR/integration-test.sh" "$@"
+    else
+        cmd_test "$@"
+    fi
+}
+
+# ─── OPERATIONS ───────────────────────────────────────────────────────
+
+cmd_queue() {
+    local agent="${1:?Usage: ct queue <agent> <message>}"
+    shift
+    local message="$*"
+    [[ -z "$message" ]] && { echo "Usage: ct queue <agent> <message>"; exit 1; }
+    
+    if [[ -x "$SCRIPT_DIR/message-queue.sh" ]]; then
+        bash "$SCRIPT_DIR/message-queue.sh" send "$agent" "$message"
+    else
+        cmd_send "$agent" "$message"
+    fi
+}
+
+cmd_track() {
+    local agent="${1:?Usage: ct track <agent> <message>}"
+    shift
+    local message="$*"
+    [[ -z "$message" ]] && { echo "Usage: ct track <agent> <message>"; exit 1; }
+    
+    if [[ -x "$SCRIPT_DIR/delivery-tracker.sh" ]]; then
+        bash "$SCRIPT_DIR/delivery-tracker.sh" send "$agent" "$message"
+    else
+        cmd_send "$agent" "$message"
+    fi
+}
+
+cmd_prs() {
+    echo -e "${BOLD}Open PRs — L0T-B0T/clawtalk${NC}"
+    echo ""
+    curl -s "https://api.github.com/repos/L0T-B0T/clawtalk/pulls?state=open" 2>/dev/null | python3 -c "
+import sys, json, datetime
+prs = json.load(sys.stdin)
+now = datetime.datetime.utcnow()
+if not prs:
+    print('  No open PRs')
+else:
+    for pr in prs:
+        num = pr['number']
+        title = pr['title'][:60]
+        author = pr['user']['login']
+        created = pr['created_at'][:10]
+        reviews = pr.get('requested_reviewers', [])
+        state = '🟡 Open'
+        print(f'  #{num:<4} {title:<60} {author:<18} {created} {state}')
+print(f'\n  Total: {len(prs)} open PRs')
+"
+    
+    # Also check recently merged
+    echo ""
+    echo -e "${BOLD}Recently Merged (last 7 days)${NC}"
+    echo ""
+    curl -s "https://api.github.com/repos/L0T-B0T/clawtalk/pulls?state=closed&sort=updated&direction=desc&per_page=5" 2>/dev/null | python3 -c "
+import sys, json, datetime
+prs = json.load(sys.stdin)
+now = datetime.datetime.utcnow()
+cutoff = (now - datetime.timedelta(days=7)).isoformat()
+merged = [pr for pr in prs if pr.get('merged_at', '') > cutoff]
+if not merged:
+    print('  None in last 7 days')
+else:
+    for pr in merged:
+        num = pr['number']
+        title = pr['title'][:60]
+        merged_at = pr['merged_at'][:10]
+        print(f'  #{num:<4} {title:<60} merged {merged_at}')
+"
+}
+
+# ─── UTILITIES ────────────────────────────────────────────────────────
+
+cmd_version() {
+    echo "ct — ClawTalk Unified CLI v$VERSION"
+    echo "Tools directory: $SCRIPT_DIR"
+    echo "Tools installed: $(ls "$SCRIPT_DIR"/*.sh 2>/dev/null | wc -l)"
+}
+
+cmd_tools() {
+    echo -e "${BOLD}ClawTalk Toolkit — $(ls "$SCRIPT_DIR"/*.sh 2>/dev/null | wc -l) tools${NC}"
+    echo ""
+    echo "  MESSAGING"
+    for t in clawtalk-sdk.sh clawtalk-client.sh clawtalk-broadcast.sh thread-manager.sh send-message.sh; do
+        [[ -x "$SCRIPT_DIR/$t" ]] && echo -e "    ${GREEN}✓${NC} $t" || echo -e "    ${RED}✗${NC} $t"
+    done
+    echo ""
+    echo "  MONITORING"
+    for t in health-monitor.sh presence-monitor.sh delivery-tracker.sh automated-healthcheck.sh network-dashboard.sh; do
+        [[ -x "$SCRIPT_DIR/$t" ]] && echo -e "    ${GREEN}✓${NC} $t" || echo -e "    ${RED}✗${NC} $t"
+    done
+    echo ""
+    echo "  ANALYTICS"
+    for t in conversation-analyzer.sh daily-report.sh weekly-summary.sh message-archiver.sh; do
+        [[ -x "$SCRIPT_DIR/$t" ]] && echo -e "    ${GREEN}✓${NC} $t" || echo -e "    ${RED}✗${NC} $t"
+    done
+    echo ""
+    echo "  QUALITY"
+    for t in api-regression-test.sh integration-test.sh; do
+        [[ -x "$SCRIPT_DIR/$t" ]] && echo -e "    ${GREEN}✓${NC} $t" || echo -e "    ${RED}✗${NC} $t"
+    done
+    echo ""
+    echo "  OPERATIONS"
+    for t in message-queue.sh pr-status-tracker.sh clawtalk-daemon.sh; do
+        [[ -x "$SCRIPT_DIR/$t" ]] && echo -e "    ${GREEN}✓${NC} $t" || echo -e "    ${RED}✗${NC} $t"
+    done
+}
+
+# ─── MAIN DISPATCH ────────────────────────────────────────────────────
+
+main() {
+    local cmd="${1:-help}"
+    shift 2>/dev/null || true
+    
+    case "$cmd" in
+        # Messaging
+        send)           cmd_send "$@" ;;
+        inbox)          cmd_inbox "$@" ;;
+        agents)         cmd_agents ;;
+        broadcast)      cmd_broadcast "$@" ;;
+        thread)         cmd_thread "$@" ;;
+        reply)          echo "Use: ct thread --reply <id> <message>" ;;
+        
+        # Monitoring
+        status)         cmd_status ;;
+        health)         cmd_health "$@" ;;
+        ping)           cmd_ping "$@" ;;
+        presence)       cmd_presence "$@" ;;
+        dashboard)      cmd_dashboard "$@" ;;
+        
+        # Analytics
+        stats)          cmd_stats "$@" ;;
+        conversations)  cmd_conversations "$@" ;;
+        weekly)         cmd_weekly "$@" ;;
+        archive)        cmd_archive "$@" ;;
+        
+        # Quality
+        test)           cmd_test "$@" ;;
+        verify)         cmd_verify "$@" ;;
+        
+        # Operations
+        queue)          cmd_queue "$@" ;;
+        track)          cmd_track "$@" ;;
+        prs)            cmd_prs ;;
+        
+        # Utilities
+        version)        cmd_version ;;
+        tools)          cmd_tools ;;
+        help|--help|-h) show_help ;;
+        
+        *)
+            echo -e "${RED}Unknown command:${NC} $cmd"
+            echo "Run 'ct help' for usage"
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"
