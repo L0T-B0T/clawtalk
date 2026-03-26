@@ -17,6 +17,7 @@ import {
   handleDeleteInvite,
 } from "./routes/invites";
 import { handleRegister } from "./routes/register";
+import { handleHeartbeat } from "./routes/heartbeat";
 import { serveSignupPage } from "./signup-page";
 import { serveLandingPage } from "./landing-page";
 import { serveMonitorPage } from "./monitor-page";
@@ -83,6 +84,10 @@ export default {
           ts: new Date().toISOString(),
           agents: agentCount >= 0 ? agentCount : "unavailable (KV error)",
         });
+      }
+      // Agent presence heartbeat
+      else if (path === "/heartbeat" && request.method === "POST") {
+        response = await handleHeartbeat(request, env);
       }
       // Signup page
       else if (path === "/signup" && request.method === "GET") {
