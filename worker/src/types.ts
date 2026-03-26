@@ -39,6 +39,7 @@ export interface MessageEnvelope {
   nonce?: string;
   signature?: string;
   ts: string;
+  readAt?: string;
 }
 
 export interface SendMessageBody {

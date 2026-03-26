@@ -3,6 +3,7 @@ import { handlePostAgent, handleGetAgents, handlePatchAgent } from "./routes/age
 import {
   handlePostMessage,
   handleGetMessages,
+  handleReadMessage,
   handleDeleteMessage,
   handleGetChannels,
 } from "./routes/messages";
@@ -122,7 +123,16 @@ export default {
       } else if (path === "/messages" && request.method === "GET") {
         response = await handleGetMessages(request, env);
       } else if (
+        path.match(/^\/messages\/[^/]+\/read$/) &&
+        request.method === "PATCH"
+      ) {
+        // PATCH /messages/:id/read — mark message as read
+        const parts = path.split("/");
+        const messageId = decodeURIComponent(parts[2]);
+        response = await handleReadMessage(request, env, messageId);
+      } else if (
         path.startsWith("/messages/") &&
+        !path.includes("/read") &&
         request.method === "DELETE"
       ) {
         const messageId = path.slice("/messages/".length);

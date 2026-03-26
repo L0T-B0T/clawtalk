@@ -278,6 +278,90 @@ export async function handleGetMessages(
   });
 }
 
+export async function handleReadMessage(
+  request: Request,
+  env: Env,
+  messageId: string
+): Promise<Response> {
+  const agentName = await validateAgentKey(request, env);
+  if (!agentName) {
+    return Response.json(
+      { error: "Unauthorized", code: "UNAUTHORIZED" },
+      { status: 401 }
+    );
+  }
+
+  // Find the message key belonging to this agent (from index)
+  const indexKey = `_index:messages:${agentName}`;
+  const keyNames = await getIndex(env.MESSAGES, indexKey);
+
+  for (const keyName of keyNames) {
+    if (keyName.endsWith(`:${messageId}`)) {
+      const raw = await env.MESSAGES.get(keyName);
+      if (!raw) {
+        return Response.json(
+          { error: "Message not found", code: "NOT_FOUND" },
+          { status: 404 }
+        );
+      }
+
+      const msg: MessageEnvelope = JSON.parse(raw);
+
+      // Only the recipient can mark a message as read
+      if (msg.to !== agentName) {
+        return Response.json(
+          { error: "Only the recipient can mark messages as read", code: "FORBIDDEN" },
+          { status: 403 }
+        );
+      }
+
+      // Already read — return current state (idempotent)
+      if (msg.readAt) {
+        return Response.json({ id: msg.id, readAt: msg.readAt });
+      }
+
+      // Mark as read
+      const readAt = new Date().toISOString();
+      msg.readAt = readAt;
+
+      // Preserve remaining TTL: compute from original ts
+      const originalTs = new Date(msg.ts).getTime();
+      const elapsed = Math.floor((Date.now() - originalTs) / 1000);
+      const remainingTtl = Math.max(DEFAULT_TTL - elapsed, 3600); // min 1h
+
+      await env.MESSAGES.put(keyName, JSON.stringify(msg), {
+        expirationTtl: remainingTtl,
+      });
+
+      // Update global log copy too (best effort)
+      const parts = keyName.split(":");
+      const ts = parts[2];
+      const globalPrefix = `global:${ts}:${messageId}:`;
+      const globalKeys = await getIndex(env.MESSAGES, "_index:messages:global");
+      const globalMatch = globalKeys.find((k: string) => k.startsWith(globalPrefix));
+      if (globalMatch) {
+        const globalRaw = await env.MESSAGES.get(globalMatch);
+        if (globalRaw) {
+          const globalMsg: MessageEnvelope = JSON.parse(globalRaw);
+          globalMsg.readAt = readAt;
+          await env.MESSAGES.put(globalMatch, JSON.stringify(globalMsg), {
+            expirationTtl: remainingTtl,
+          });
+        }
+      }
+
+      invalidate("messages:");
+
+      return Response.json({ id: msg.id, readAt });
+    }
+  }
+
+  return Response.json(
+    { error: "Message not found", code: "NOT_FOUND" },
+    { status: 404 }
+  );
+}
+
 export async function handleDeleteMessage(
   request: Request,
   env: Env,
