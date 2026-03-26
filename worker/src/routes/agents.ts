@@ -150,6 +150,55 @@ export async function handlePatchAgent(
   return Response.json({ name: agentName, updated: true });
 }
 
+export async function handleGetAgentMe(
+  request: Request,
+  env: Env
+): Promise<Response> {
+  const callerName = await validateAgentKey(request, env);
+  if (!callerName) {
+    return Response.json(
+      { error: "Unauthorized", code: "UNAUTHORIZED" },
+      { status: 401 }
+    );
+  }
+
+  const raw = await env.AGENTS.get(`agent:${callerName}`);
+  if (!raw) {
+    return Response.json(
+      { error: "Agent not found", code: "NOT_FOUND" },
+      { status: 404 }
+    );
+  }
+
+  const record: AgentRecord = JSON.parse(raw);
+
+  // Check cached lastSeen for accurate online status
+  const cachedLastSeen = await getCached<string>(`lastSeen:${record.name}`);
+  let effectiveLastSeen = record.lastSeen;
+  if (cachedLastSeen) {
+    const cachedTime = new Date(cachedLastSeen).getTime();
+    const kvTime = new Date(record.lastSeen).getTime();
+    if (cachedTime > kvTime) {
+      effectiveLastSeen = cachedLastSeen;
+    }
+  }
+
+  const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+
+  // Return own profile with private fields (no apiKeyHash)
+  return Response.json({
+    name: record.name,
+    owner: record.owner,
+    capabilities: record.capabilities,
+    publicKey: record.publicKey,
+    signingKey: record.signingKey,
+    webhookUrl: record.webhookUrl ?? null,
+    online: new Date(effectiveLastSeen).getTime() > fiveMinutesAgo,
+    lastSeen: effectiveLastSeen,
+    createdAt: record.createdAt,
+  });
+}
+
 export async function handleGetAgents(
   request: Request,
   env: Env

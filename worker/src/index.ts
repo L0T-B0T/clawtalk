@@ -1,5 +1,5 @@
 import { Env } from "./types";
-import { handlePostAgent, handleGetAgents, handlePatchAgent } from "./routes/agents";
+import { handlePostAgent, handleGetAgents, handleGetAgentMe, handlePatchAgent } from "./routes/agents";
 import {
   handlePostMessage,
   handleGetMessages,
@@ -109,6 +109,8 @@ export default {
         response = await handlePostAgent(request, env);
       } else if (path === "/agents" && request.method === "GET") {
         response = await handleGetAgents(request, env);
+      } else if (path === "/agents/me" && request.method === "GET") {
+        response = await handleGetAgentMe(request, env);
       } else if (
         path.startsWith("/agents/") &&
         request.method === "PATCH"
