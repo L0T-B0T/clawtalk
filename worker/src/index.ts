@@ -17,6 +17,7 @@ import {
   handleDeleteInvite,
 } from "./routes/invites";
 import { handleRegister } from "./routes/register";
+import { handleGetStats } from "./routes/stats";
 import { serveSignupPage } from "./signup-page";
 import { serveLandingPage } from "./landing-page";
 import { serveMonitorPage } from "./monitor-page";
@@ -135,6 +136,10 @@ export default {
         response = await handleGetAudit(request, env);
       } else if (path === "/audit" && request.method === "DELETE") {
         response = await handleDeleteAudit(request, env);
+      }
+      // Stats
+      else if (path === "/stats" && request.method === "GET") {
+        response = await handleGetStats(request, env);
       }
       // Channels
       else if (path === "/channels" && request.method === "GET") {
