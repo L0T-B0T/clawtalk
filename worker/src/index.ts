@@ -17,6 +17,7 @@ import {
   handleDeleteInvite,
 } from "./routes/invites";
 import { handleRegister } from "./routes/register";
+import { handleSearchMessages } from "./routes/search";
 import { serveSignupPage } from "./signup-page";
 import { serveLandingPage } from "./landing-page";
 import { serveMonitorPage } from "./monitor-page";
@@ -115,6 +116,10 @@ export default {
       ) {
         const agentName = decodeURIComponent(path.slice("/agents/".length));
         response = await handlePatchAgent(request, env, agentName);
+      }
+      // Messages — search (must be before generic /messages/ routes)
+      else if (path === "/messages/search" && request.method === "GET") {
+        response = await handleSearchMessages(request, env);
       }
       // Messages
       else if (path === "/messages" && request.method === "POST") {
