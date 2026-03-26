@@ -34,6 +34,7 @@ export interface MessageEnvelope {
   topic?: string;
   correlationId?: string;
   replyTo?: string;
+  threadId?: string;
   encrypted: boolean;
   payload: string | object;
   nonce?: string;
@@ -47,6 +48,7 @@ export interface SendMessageBody {
   topic?: string;
   correlationId?: string;
   replyTo?: string;
+  threadId?: string;
   encrypted: boolean;
   payload: string | object;
   nonce?: string;

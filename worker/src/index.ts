@@ -11,6 +11,7 @@ import {
   handleGetAudit,
   handleDeleteAudit,
 } from "./routes/audit";
+import { handleGetThread } from "./routes/threads";
 import {
   handlePostInvite,
   handleGetInvites,
@@ -127,6 +128,14 @@ export default {
       ) {
         const messageId = path.slice("/messages/".length);
         response = await handleDeleteMessage(request, env, messageId);
+      }
+      // Threads
+      else if (
+        path.startsWith("/threads/") &&
+        request.method === "GET"
+      ) {
+        const messageId = decodeURIComponent(path.slice("/threads/".length));
+        response = await handleGetThread(request, env, messageId);
       }
       // Audit
       else if (path === "/audit" && request.method === "POST") {

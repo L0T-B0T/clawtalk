@@ -102,6 +102,30 @@ export async function handlePostMessage(
   const ts = new Date().toISOString();
   const ttl = Math.min(body.ttl || DEFAULT_TTL, MAX_TTL);
 
+  // Thread resolution: if replyTo is set, resolve the threadId from the
+  // parent message so entire conversation chains share the same thread root.
+  // Explicit threadId in the request body takes priority.
+  let threadId = body.threadId;
+  if (!threadId && body.replyTo) {
+    // Look up the parent message to inherit its threadId
+    const globalKeys = await getIndex(env.MESSAGES, "_index:messages:global");
+    for (const key of globalKeys) {
+      if (key.includes(body.replyTo)) {
+        const parentRaw = await env.MESSAGES.get(key);
+        if (parentRaw) {
+          const parent: MessageEnvelope = JSON.parse(parentRaw);
+          if (parent.id === body.replyTo) {
+            // Use the parent's threadId if it has one, otherwise the parent's id
+            threadId = parent.threadId || parent.id;
+            break;
+          }
+        }
+      }
+    }
+    // Fallback: if parent not found, use replyTo as threadId
+    if (!threadId) threadId = body.replyTo;
+  }
+
   const baseEnvelope = {
     id: msgId,
     from: senderName,
@@ -109,6 +133,7 @@ export async function handlePostMessage(
     topic: body.topic,
     correlationId: body.correlationId,
     replyTo: body.replyTo,
+    threadId,
     encrypted: body.encrypted,
     payload: body.payload,
     nonce: body.nonce,
@@ -204,7 +229,7 @@ export async function handlePostMessage(
   invalidate("messages:");
   invalidate("agents:"); // lastSeen changed
 
-  return Response.json({ id: msgId, ts }, { status: 201 });
+  return Response.json({ id: msgId, ts, threadId: threadId || undefined }, { status: 201 });
 }
 
 export async function handleGetMessages(
@@ -230,6 +255,7 @@ export async function handleGetMessages(
     MAX_LIMIT
   );
   const topic = url.searchParams.get("topic");
+  const threadId = url.searchParams.get("threadId"); // filter by thread
 
   // Admin sees all messages via global log; agents see their inbox
   const indexKey = isAdmin ? "_index:messages:global" : `_index:messages:${agentName}`;
@@ -251,6 +277,7 @@ export async function handleGetMessages(
 
     if (sinceTime && new Date(msg.ts).getTime() <= sinceTime) continue;
     if (topic && msg.topic !== topic) continue;
+    if (threadId && msg.threadId !== threadId && msg.id !== threadId) continue;
 
     messages.push(msg);
   }
