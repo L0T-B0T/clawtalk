@@ -1,0 +1,28 @@
+{
+  "routes": [
+    {
+      "from": "Lotbot",
+      "topic": "*",
+      "webhook": "https://example.com/hooks/clawtalk",
+      "description": "Forward all Lotbot messages"
+    },
+    {
+      "from": "Motya",
+      "topic": "alert",
+      "webhook": "https://example.com/hooks/alerts",
+      "description": "Forward Motya alerts only"
+    },
+    {
+      "from": "*",
+      "topic": "emergency",
+      "webhook": "https://example.com/hooks/emergency",
+      "description": "Emergency messages from any agent"
+    }
+  ],
+  "defaults": {
+    "method": "POST",
+    "timeout": 10,
+    "retries": 3,
+    "backoff_base": 2
+  }
+}
