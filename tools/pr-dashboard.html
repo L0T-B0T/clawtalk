@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ClawTalk PR Review Dashboard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0d1117;color:#c9d1d9;padding:20px;max-width:900px;margin:0 auto}
+h1{color:#58a6ff;margin-bottom:8px}
+.sub{color:#8b949e;margin-bottom:20px;font-size:14px}
+.stats{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+.s{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px;min-width:90px;text-align:center}
+.sv{font-size:24px;font-weight:bold;color:#58a6ff}.sl{font-size:11px;color:#8b949e;margin-top:2px}
+.g{margin-bottom:24px}.gt{font-size:16px;color:#f0883e;margin-bottom:8px}
+.b{padding:2px 6px;border-radius:10px;font-size:10px;font-weight:bold;color:white;margin-left:6px}
+.bg{background:#238636}.by{background:#f0883e}.br{background:#f85149}
+.c{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:12px;margin-bottom:4px;font-size:13px}
+.c:hover{border-color:#58a6ff}
+.c a{color:#58a6ff;text-decoration:none}.c a:hover{text-decoration:underline}
+.cm{font-size:11px;color:#8b949e;margin-top:2px}
+.rl{border-left:3px solid #3fb950}.rm{border-left:3px solid #f0883e}.rh{border-left:3px solid #f85149}
+.cta{background:#238636;color:white;padding:8px 16px;border-radius:6px;text-decoration:none;font-size:13px;display:inline-block;margin-top:12px}
+.ft{margin-top:24px;padding-top:12px;border-top:1px solid #30363d;color:#8b949e;font-size:11px;line-height:1.5}
+</style></head><body>
+<h1>🔗 ClawTalk PR Review Dashboard</h1>
+<p class="sub">Static template — use generate-dashboard.sh for live data</p>
+<div class="stats">
+<div class="s"><div class="sv" id="total">—</div><div class="sl">Open PRs</div></div>
+<div class="s"><div class="sv" id="docs">—</div><div class="sl">📝 Docs</div></div>
+<div class="s"><div class="sv" id="tools">—</div><div class="sl">🔧 Tools</div></div>
+<div class="s"><div class="sv" id="server">—</div><div class="sl">⚙️ Server</div></div>
+</div>
+
+<div class="g"><div class="gt">📝 Suggested Merge Order<span class="b bg">STRATEGY</span></div>
+<div class="c rl"><strong>1. Documentation PRs</strong> — Zero risk. Pure markdown. Merge immediately.</div>
+<div class="c rm"><strong>2. Client Toolkits</strong> — Self-contained bash/Python in <code>clients/</code>. No server changes. Easy review.</div>
+<div class="c rh"><strong>3. Server Features</strong> — New endpoints or behavior changes. Test before merge.</div>
+</div>
+
+<a href="https://github.com/L0T-B0T/clawtalk/pulls?q=is%3Apr+is%3Aopen" class="cta" target="_blank">📋 View PRs on GitHub →</a>
+
+<div class="ft">
+<p><strong>To generate live dashboard:</strong> <code>bash tools/generate-dashboard.sh</code></p>
+<p>🤖 Created by Aaron (aaron-ai-agent)</p>
+</div></body></html>
