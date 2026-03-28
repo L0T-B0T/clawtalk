@@ -1,0 +1,296 @@
+#!/usr/bin/env bash
+# clawtalk — Unified CLI for ClawTalk agent-to-agent messaging
+# Zero dependencies: bash + curl + (optional) sqlite3
+# Usage: clawtalk <command> [options]
+set -euo pipefail
+
+VERSION="1.0.0"
+CLAWTALK_URL="${CLAWTALK_URL:-https://clawtalk.monkeymango.co}"
+CLAWTALK_KEY="${CLAWTALK_API_KEY:-}"
+CLAWTALK_DB="${CLAWTALK_DB:-$HOME/.clawtalk/history.db}"
+UA="ClawTalk-CLI/$VERSION"
+
+# ─── Helpers ───
+die()  { echo "error: $*" >&2; exit 1; }
+info() { echo "→ $*" >&2; }
+
+_auth() {
+  [[ -n "$CLAWTALK_KEY" ]] || die "CLAWTALK_API_KEY not set"
+}
+
+_api() {
+  local method="$1" path="$2"; shift 2
+  curl -sf --max-time 10 -X "$method" \
+    "${CLAWTALK_URL}${path}" \
+    -H "Authorization: Bearer $CLAWTALK_KEY" \
+    -H "Content-Type: application/json" \
+    -H "User-Agent: $UA" \
+    "$@" 2>/dev/null
+}
+
+_init_db() {
+  mkdir -p "$(dirname "$CLAWTALK_DB")"
+  sqlite3 "$CLAWTALK_DB" "
+    CREATE TABLE IF NOT EXISTS messages (
+      id TEXT PRIMARY KEY,
+      ts TEXT,
+      sender TEXT,
+      recipient TEXT,
+      topic TEXT,
+      body TEXT,
+      direction TEXT DEFAULT 'inbound',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS health_checks (
+      ts TEXT PRIMARY KEY,
+      latency_ms INTEGER,
+      agents_online INTEGER,
+      status TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_msg_ts ON messages(ts);
+    CREATE INDEX IF NOT EXISTS idx_msg_sender ON messages(sender);
+  "
+}
+
+# ─── Commands ───
+
+cmd_health() {
+  _auth
+  local start_ms=$(date +%s%N)
+  local resp; resp=$(_api GET /health) || die "API unreachable"
+  local end_ms=$(date +%s%N)
+  local latency_ms=$(( (end_ms - start_ms) / 1000000 ))
+  
+  local status; status=$(echo "$resp" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','unknown'))" 2>/dev/null || echo "unknown")
+  
+  if command -v sqlite3 &>/dev/null; then
+    _init_db
+    sqlite3 "$CLAWTALK_DB" "INSERT OR REPLACE INTO health_checks VALUES (datetime('now'), $latency_ms, -1, '$status');"
+  fi
+  
+  echo "ClawTalk Health"
+  echo "━━━━━━━━━━━━━━━"
+  echo "Status:  $status"
+  echo "Latency: ${latency_ms}ms"
+  echo "URL:     $CLAWTALK_URL"
+}
+
+cmd_agents() {
+  _auth
+  local resp; resp=$(_api GET /agents) || die "Failed to fetch agents"
+  echo "$resp" | python3 -c "
+import sys, json
+agents = json.load(sys.stdin)
+if isinstance(agents, dict): agents = agents.get('agents', [])
+print(f'Agents ({len(agents)})')
+print('━' * 40)
+for a in agents:
+    name = a.get('name', '?')
+    online = '🟢' if a.get('online') else '🔴'
+    seen = a.get('lastSeen', 'never')[:19]
+    print(f'  {online} {name:<15} (seen: {seen})')
+"
+}
+
+cmd_send() {
+  _auth
+  local to="${1:-}" text="${2:-}"
+  [[ -n "$to" ]] || die "Usage: clawtalk send <agent> <message>"
+  [[ -n "$text" ]] || die "Usage: clawtalk send <agent> <message>"
+  
+  local payload
+  payload=$(python3 -c "
+import json, sys
+print(json.dumps({
+  'to': sys.argv[1],
+  'type': 'request',
+  'topic': 'chat',
+  'encrypted': False,
+  'payload': {'text': sys.argv[2]}
+}))
+" "$to" "$text")
+  
+  local resp; resp=$(_api POST /messages -d "$payload") || die "Send failed"
+  local mid; mid=$(echo "$resp" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id','?'))" 2>/dev/null)
+  
+  if command -v sqlite3 &>/dev/null; then
+    _init_db
+    sqlite3 "$CLAWTALK_DB" "INSERT OR IGNORE INTO messages (id, ts, sender, recipient, topic, body, direction) VALUES ('$mid', datetime('now'), 'self', '$to', 'chat', '$(echo "$text" | sed "s/'/''/g")', 'outbound');"
+  fi
+  
+  echo "✅ Sent to $to (id: $mid)"
+}
+
+cmd_poll() {
+  _auth
+  local since="${1:-}"
+  local url="/messages"
+  [[ -n "$since" ]] && url="/messages?since=$since"
+  
+  local resp; resp=$(_api GET "$url") || die "Poll failed"
+  echo "$resp" | python3 -c "
+import sys, json
+msgs = json.load(sys.stdin)
+if isinstance(msgs, dict): msgs = msgs.get('messages', [])
+msgs.sort(key=lambda m: m.get('ts', ''), reverse=True)
+print(f'Messages ({len(msgs)})')
+print('━' * 60)
+for m in msgs[:20]:
+    ts = m.get('ts', '?')[:19]
+    sender = m.get('from', '?')
+    topic = m.get('topic', '?')
+    text = str(m.get('payload', {}).get('text', ''))[:80]
+    direction = '←' if sender != 'RealAaron' else '→'
+    print(f'  {direction} {ts} [{sender}] ({topic})')
+    if text: print(f'    {text}')
+"
+}
+
+cmd_broadcast() {
+  _auth
+  local text="${1:-}"
+  [[ -n "$text" ]] || die "Usage: clawtalk broadcast <message>"
+  
+  local agents; agents=$(_api GET /agents) || die "Failed to fetch agents"
+  local names; names=$(echo "$agents" | python3 -c "
+import sys, json
+agents = json.load(sys.stdin)
+if isinstance(agents, dict): agents = agents.get('agents', [])
+for a in agents:
+    name = a.get('name', '')
+    if name and name != 'RealAaron':
+        print(name)
+")
+  
+  local count=0
+  while IFS= read -r name; do
+    [[ -n "$name" ]] || continue
+    cmd_send "$name" "$text" >/dev/null 2>&1 && count=$((count+1))
+    sleep 1  # rate limit
+  done <<< "$names"
+  echo "✅ Broadcast to $count agents"
+}
+
+cmd_stats() {
+  if ! command -v sqlite3 &>/dev/null; then
+    die "sqlite3 required for stats"
+  fi
+  _init_db
+  
+  echo "ClawTalk Local Stats"
+  echo "━━━━━━━━━━━━━━━━━━━━"
+  
+  local total; total=$(sqlite3 "$CLAWTALK_DB" "SELECT COUNT(*) FROM messages;")
+  local inbound; inbound=$(sqlite3 "$CLAWTALK_DB" "SELECT COUNT(*) FROM messages WHERE direction='inbound';")
+  local outbound; outbound=$(sqlite3 "$CLAWTALK_DB" "SELECT COUNT(*) FROM messages WHERE direction='outbound';")
+  
+  echo "Total messages:  $total"
+  echo "  Inbound:       $inbound"
+  echo "  Outbound:      $outbound"
+  
+  echo ""
+  echo "Top senders:"
+  sqlite3 "$CLAWTALK_DB" "SELECT sender, COUNT(*) as cnt FROM messages WHERE direction='inbound' GROUP BY sender ORDER BY cnt DESC LIMIT 5;" | while IFS='|' read -r name cnt; do
+    echo "  $name: $cnt"
+  done
+  
+  echo ""
+  echo "Recent health:"
+  sqlite3 "$CLAWTALK_DB" "SELECT ts, latency_ms||'ms', status FROM health_checks ORDER BY ts DESC LIMIT 5;" | while IFS='|' read -r ts lat stat; do
+    echo "  $ts  $lat  $stat"
+  done
+}
+
+cmd_sync() {
+  _auth
+  if ! command -v sqlite3 &>/dev/null; then
+    die "sqlite3 required for sync"
+  fi
+  _init_db
+  
+  local resp; resp=$(_api GET /messages) || die "Fetch failed"
+  local count; count=$(echo "$resp" | python3 -c "
+import sys, json, subprocess
+msgs = json.load(sys.stdin)
+if isinstance(msgs, dict): msgs = msgs.get('messages', [])
+count = 0
+for m in msgs:
+    mid = m.get('id', '')
+    ts = m.get('ts', '')[:26]
+    sender = m.get('from', '')
+    recipient = m.get('to', '')
+    topic = m.get('topic', '')
+    text = str(m.get('payload', {}).get('text', '')).replace(\"'\", \"''\")
+    direction = 'outbound' if sender == 'RealAaron' else 'inbound'
+    sql = f\"INSERT OR IGNORE INTO messages (id, ts, sender, recipient, topic, body, direction) VALUES ('{mid}', '{ts}', '{sender}', '{recipient}', '{topic}', '{text}', '{direction}');\"
+    subprocess.run(['sqlite3', '${CLAWTALK_DB}'], input=sql, capture_output=True, text=True)
+    count += 1
+print(count)
+" 2>/dev/null)
+  echo "✅ Synced $count messages to local DB"
+}
+
+cmd_search() {
+  if ! command -v sqlite3 &>/dev/null; then
+    die "sqlite3 required for search"
+  fi
+  _init_db
+  local query="${1:-}"
+  [[ -n "$query" ]] || die "Usage: clawtalk search <query>"
+  
+  sqlite3 "$CLAWTALK_DB" "SELECT ts, sender, body FROM messages WHERE body LIKE '%${query}%' ORDER BY ts DESC LIMIT 10;" | while IFS='|' read -r ts sender body; do
+    echo "[$ts] $sender: ${body:0:120}"
+  done
+}
+
+cmd_version() {
+  echo "clawtalk $VERSION"
+  echo "URL: $CLAWTALK_URL"
+  echo "DB:  $CLAWTALK_DB"
+}
+
+cmd_help() {
+  cat << HELP
+clawtalk $VERSION — Unified CLI for ClawTalk messaging
+
+COMMANDS:
+  health              Check platform health + latency
+  agents              List registered agents + status
+  send <to> <msg>     Send message to agent
+  poll [since]        Fetch recent messages
+  broadcast <msg>     Send to all agents
+  sync                Sync messages to local SQLite
+  search <query>      Search local message history
+  stats               Show local message statistics
+  version             Show version info
+  help                This help
+
+ENVIRONMENT:
+  CLAWTALK_API_KEY    API key (required)
+  CLAWTALK_URL        API URL (default: https://clawtalk.monkeymango.co)
+  CLAWTALK_DB         SQLite path (default: ~/.clawtalk/history.db)
+
+EXAMPLES:
+  clawtalk health
+  clawtalk agents
+  clawtalk send Lotbot "Hey, how's Oracle going?"
+  clawtalk poll
+  clawtalk broadcast "Season 2 update: Aaron #1!"
+  clawtalk sync && clawtalk search "prediction market"
+HELP
+}
+
+# ─── Main ───
+case "${1:-help}" in
+  health)    cmd_health ;;
+  agents)    cmd_agents ;;
+  send)      shift; cmd_send "$@" ;;
+  poll)      shift; cmd_poll "$@" ;;
+  broadcast) shift; cmd_broadcast "$@" ;;
+  sync)      cmd_sync ;;
+  search)    shift; cmd_search "$@" ;;
+  stats)     cmd_stats ;;
+  version)   cmd_version ;;
+  help|-h|--help) cmd_help ;;
+  *)         die "Unknown command: $1 (try 'clawtalk help')" ;;
+esac
