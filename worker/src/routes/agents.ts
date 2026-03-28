@@ -223,3 +223,38 @@ export async function handleGetAgents(
 
   return Response.json(agents);
 }
+
+/**
+ * GET /agents/me — authenticated self-profile endpoint
+ * Consolidated from PR #29
+ */
+export async function handleGetAgentSelf(request: Request, env: Env): Promise<Response> {
+  const agentName = await validateAgentKey(request, env);
+  if (!agentName) {
+    return Response.json({ error: "Unauthorized", code: "UNAUTHORIZED" }, { status: 401 });
+  }
+
+  const raw = await env.AGENTS.get(`agent:${agentName}`);
+  if (!raw) {
+    return Response.json({ error: "Agent not found", code: "NOT_FOUND" }, { status: 404 });
+  }
+
+  const agent: AgentRecord = JSON.parse(raw);
+
+  // Return full profile (excluding sensitive fields)
+  return Response.json({
+    name: agent.name,
+    owner: agent.owner,
+    capabilities: agent.capabilities || [],
+    webhookUrl: agent.webhookUrl || null,
+    publicKey: agent.publicKey,
+    lastSeen: agent.lastSeen,
+    createdAt: agent.createdAt,
+    online: isOnline(agent.lastSeen),
+  });
+}
+
+function isOnline(lastSeen: string): boolean {
+  const fiveMinutes = 5 * 60 * 1000;
+  return Date.now() - new Date(lastSeen).getTime() < fiveMinutes;
+}

@@ -1,10 +1,11 @@
 import { Env } from "./types";
-import { handlePostAgent, handleGetAgents, handlePatchAgent } from "./routes/agents";
+import { handlePostAgent, handleGetAgents, handlePatchAgent, handleGetAgentSelf } from "./routes/agents";
 import {
   handlePostMessage,
   handleGetMessages,
   handleDeleteMessage,
   handleGetChannels,
+  handleMarkRead,
 } from "./routes/messages";
 import {
   handlePostAudit,
@@ -17,6 +18,10 @@ import {
   handleDeleteInvite,
 } from "./routes/invites";
 import { handleRegister } from "./routes/register";
+import { handleGetStats } from "./routes/stats";
+import { handlePostHeartbeat } from "./routes/heartbeat";
+import { handleGetThread, handleGetThreads } from "./routes/threads";
+import { handleGetSearch } from "./routes/search";
 import { serveSignupPage } from "./signup-page";
 import { serveLandingPage } from "./landing-page";
 import { serveMonitorPage } from "./monitor-page";
@@ -105,6 +110,9 @@ export default {
         response = await handleDeleteInvite(request, env, code);
       }
       // Agents
+      else if (path === "/agents/me" && request.method === "GET") {
+        response = await handleGetAgentSelf(request, env);
+      }
       else if (path === "/agents" && request.method === "POST") {
         response = await handlePostAgent(request, env);
       } else if (path === "/agents" && request.method === "GET") {
@@ -140,6 +148,33 @@ export default {
       else if (path === "/channels" && request.method === "GET") {
         response = await handleGetChannels(request, env);
       }
+      // Stats
+      else if (path === "/stats" && request.method === "GET") {
+        response = await handleGetStats(request, env);
+      }
+      // Heartbeat (presence signal)
+      else if (path === "/heartbeat" && request.method === "POST") {
+        response = await handlePostHeartbeat(request, env);
+      }
+      // Threads
+      else if (path === "/threads" && request.method === "GET") {
+        response = await handleGetThreads(request, env);
+      }
+      else if (path.startsWith("/threads/") && request.method === "GET") {
+        const threadId = decodeURIComponent(path.slice("/threads/".length));
+        response = await handleGetThread(request, env, threadId);
+      }
+      // Search
+      else if (path === "/messages/search" && request.method === "GET") {
+        response = await handleGetSearch(request, env);
+      }
+      // Read receipts
+      else if (path.match(/^\/messages\/[^/]+\/read$/) && request.method === "PATCH") {
+        const parts = path.split("/");
+        const messageId = decodeURIComponent(parts[2]);
+        response = await handleMarkRead(request, env, messageId);
+      }
+      
       // 404
       else {
         response = Response.json(

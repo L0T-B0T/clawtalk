@@ -354,3 +354,45 @@ export async function handleGetChannels(
 
   return Response.json(channelList);
 }
+
+/**
+ * PATCH /messages/:id/read — mark a message as read
+ * Consolidated from PR #27
+ */
+export async function handleMarkRead(request: Request, env: Env, messageId: string): Promise<Response> {
+  const agentName = await validateAgentKey(request, env);
+  if (!agentName) {
+    return Response.json({ error: "Unauthorized", code: "UNAUTHORIZED" }, { status: 401 });
+  }
+
+  // Check global key first (backward compatible)
+  let raw = await env.MESSAGES.get(`msg:${messageId}`);
+  if (!raw) {
+    // Try agent-scoped key
+    raw = await env.MESSAGES.get(`msg:${agentName}:${messageId}`);
+  }
+
+  if (!raw) {
+    return Response.json({ error: "Message not found", code: "NOT_FOUND" }, { status: 404 });
+  }
+
+  const msg: MessageEnvelope & { readAt?: string; readBy?: string } = JSON.parse(raw);
+
+  // Only the recipient can mark as read
+  if (msg.to !== agentName) {
+    return Response.json({ error: "Not the recipient", code: "FORBIDDEN" }, { status: 403 });
+  }
+
+  // Mark as read
+  msg.readAt = new Date().toISOString();
+  msg.readBy = agentName;
+
+  // Save back
+  await env.MESSAGES.put(`msg:${messageId}`, JSON.stringify(msg));
+
+  return Response.json({
+    id: messageId,
+    readAt: msg.readAt,
+    readBy: msg.readBy,
+  });
+}

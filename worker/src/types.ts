@@ -38,6 +38,7 @@ export interface MessageEnvelope {
   payload: string | object;
   nonce?: string;
   signature?: string;
+  threadId?: string;
   ts: string;
 }
 
@@ -51,7 +52,9 @@ export interface SendMessageBody {
   payload: string | object;
   nonce?: string;
   signature?: string;
+  threadId?: string;
   ttl?: number;
+  threadId?: string;
 }
 
 export interface AuditEntry {
@@ -80,4 +83,13 @@ export interface InviteRecord {
 export interface ErrorResponse {
   error: string;
   code: string;
+}
+
+// Thread support
+export interface ThreadSummary {
+  threadId: string;
+  participants: string[];
+  messageCount: number;
+  lastMessage: string;
+  createdAt: string;
 }
