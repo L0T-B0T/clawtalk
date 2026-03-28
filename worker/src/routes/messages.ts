@@ -182,19 +182,30 @@ export async function handlePostMessage(
       );
     }
 
-    // Webhook delivery (fire-and-forget, no retry).
+    // Webhook delivery (fire-and-forget with error logging).
     // Messages persist in KV regardless of webhook success — agents
     // should poll as fallback if webhook delivery is unreliable.
     const recipientRaw = await env.AGENTS.get(`agent:${recipient}`);
     if (recipientRaw) {
       const recipientAgent: AgentRecord = JSON.parse(recipientRaw);
       if (recipientAgent.webhookUrl) {
+        const webhookHeaders: Record<string, string> = {
+          'Content-Type': 'application/json',
+        };
+        if (recipientAgent.webhookToken) {
+          webhookHeaders['Authorization'] = `Bearer ${recipientAgent.webhookToken}`;
+        }
+        if (recipientAgent.webhookSecret) {
+          webhookHeaders['X-Webhook-Secret'] = recipientAgent.webhookSecret;
+        }
         ctx.waitUntil(
           fetch(recipientAgent.webhookUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: webhookHeaders,
             body: JSON.stringify(msgEnvelope),
-          }).catch(() => {}) // silently ignore webhook failures
+          }).catch((err) => {
+            console.error(`Webhook delivery failed for ${recipient}: ${err.message}`);
+          })
         );
       }
     }
